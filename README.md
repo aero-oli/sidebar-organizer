@@ -75,7 +75,7 @@ If you have not disabled [My Home Assistant], click the button below to add this
 1. Restart Home Assistant
 1. Open Sidebar Organizer and select `Home Assistant config folder` as the config source
 
-Sidebar Organizer v4.0.3 and newer is packaged as a Home Assistant custom integration. The integration serves and loads the frontend module automatically, so you do not need a separate Dashboard resource or `frontend.extra_module_url` entry.
+Sidebar Organizer v4.0.4 and newer is packaged as a Home Assistant custom integration. The integration serves and loads the frontend module automatically, so you do not need a separate Dashboard resource or `frontend.extra_module_url` entry.
 
 ```yaml
 sidebar_organizer:

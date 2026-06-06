@@ -75,8 +75,8 @@ default_collapsed: {}
 
     def test_frontend_module_url_includes_version_cache_buster(self) -> None:
         self.assertEqual(
-            frontend_module_url("4.0.3"),
-            "/sidebar_organizer/frontend/sidebar-organizer.js?v=4.0.3",
+            frontend_module_url("4.0.4"),
+            "/sidebar_organizer/frontend/sidebar-organizer.js?v=4.0.4",
         )
 
 
