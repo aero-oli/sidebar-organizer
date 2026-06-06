@@ -96,6 +96,30 @@ frontend:
 
 4. Restart Home Assistant
 
+## Optional backend integration for private config-folder YAML
+
+Sidebar Organizer is primarily installed as a HACS frontend/plugin resource. HACS frontend plugin repositories may not install `custom_components` automatically, so the backend integration in this repository is optional and may need to be installed manually.
+
+Use the backend integration when you want one shared YAML file in the private Home Assistant config directory, for example `/config/sidebar-organizer.yaml`, instead of browser local storage or a public `/local` file.
+
+1. Copy `custom_components/sidebar_organizer` from this repository to `/config/custom_components/sidebar_organizer`.
+2. Add the backend configuration to `configuration.yaml`.
+3. Restart Home Assistant.
+4. Open Sidebar Organizer and select `Home Assistant config folder` as the config source.
+
+```yaml
+frontend:
+  extra_module_url:
+    - /hacsfiles/sidebar-organizer/sidebar-organizer.js
+
+sidebar_organizer:
+  config_path: sidebar-organizer.yaml
+  allow_write: true
+  create_if_missing: true
+```
+
+`config_path` is resolved under the Home Assistant config directory. You can also use a subdirectory such as `configs/sidebar-organizer.yaml`.
+
 ## Manual
 
 <details>
@@ -250,11 +274,87 @@ In this section, you can organize the layout of the sidebar panels by customizin
 
 ### Code
 
-- This section lets you edit the raw YAML configuration file used by Sidebar Organizer. You can also download the current configuration as a YAML file, which should be saved in the `www` folder with the name `sidebar-organizer.yaml`.
+- This section lets you edit the raw YAML configuration used by Sidebar Organizer. You can also download the current configuration as a YAML file.
 
-- _This file is useful for synchronizing your sidebar settings across multiple devices. For instance, if you have a companion app and want to apply the same sidebar setup without repeating the entire process, you can enable the option to use the YAML config file in the app. This ensures the sidebar layout will be consistent with the configuration from the YAML file._
+- Sidebar Organizer supports three config sources:
+
+  - `Browser storage`: the existing local browser storage behavior.
+  - `Static YAML file from /local`: the existing `/config/www/sidebar-organizer.yaml` file, served as `/local/sidebar-organizer.yaml`.
+  - `Home Assistant config folder`: the optional backend integration reads and writes a private config-folder YAML file through authenticated Home Assistant WebSocket commands.
+
+- The static `/local` file is useful for sharing one file URL, but `/config/www` is a public/static frontend resource path. It is not the same as private config-folder storage.
+
+- The Home Assistant config-folder mode uses the optional `sidebar_organizer` backend integration. The frontend does not send arbitrary file paths by default; the backend owns the configured path.
 
   ![Config RAW Code](assets/config-raw-code.png)
+
+## Home Assistant config-folder mode
+
+When `home_assistant_config` is selected in the config dialog, Sidebar Organizer calls the backend WebSocket API:
+
+- `sidebar_organizer/config/info`
+- `sidebar_organizer/config/read`
+- `sidebar_organizer/config/validate`
+- `sidebar_organizer/config/write`
+
+The YAML file becomes the source of truth for all browsers, devices, and users because it is read from Home Assistant itself. Browser storage may keep a last-good fallback copy, but it is not treated as the source of truth in this mode.
+
+Example `/config/sidebar-organizer.yaml`:
+
+```yaml
+header_title: Home Assistant
+hide_header_toggle: false
+bottom_items: []
+custom_groups: {}
+default_collapsed: []
+color_config:
+  border_radius: 8
+  light:
+    divider_color: '#dddddd'
+    background_color: '#ffffff'
+    border_top_color: '#e0e0e0'
+    scrollbar_thumb_color: '#cccccc'
+    custom_sidebar_background_color: ''
+  dark:
+    divider_color: '#444444'
+    background_color: '#333333'
+    border_top_color: '#555555'
+    scrollbar_thumb_color: '#666666'
+    custom_sidebar_background_color: ''
+```
+
+Security notes:
+
+- Do not put secrets in `sidebar-organizer.yaml`.
+- Do not place the private config-folder file under `/config/www`.
+- `/config/www` is served as `/local`; the backend mode deliberately does not register the YAML file as a static path.
+- Write operations require `allow_write: true` and an admin Home Assistant user.
+- `config_path` is validated server-side and must resolve inside the Home Assistant config directory.
+
+Troubleshooting:
+
+- Backend unavailable: copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`, add `sidebar_organizer:` to `configuration.yaml`, then restart Home Assistant.
+- Invalid YAML: use `Validate YAML` in the config dialog or check the Home Assistant log. Invalid YAML is reported and should not crash the sidebar.
+- File missing: set `create_if_missing: true` or create the file manually.
+- Write disabled: set `allow_write: true` and restart Home Assistant.
+- Non-admin user cannot write: sign in with an admin user for save operations.
+- Browser still showing stale sidebar: reload from HA config, then hard refresh the browser. For HACS resource changes, update the resource URL/cache tag if needed.
+
+Manual test checklist:
+
+1. Build frontend: `pnpm install` then `pnpm run build`.
+2. Copy the built JS to Home Assistant, or use the existing HACS resource path.
+3. Copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`.
+4. Add `sidebar_organizer:` config to `configuration.yaml`.
+5. Restart Home Assistant.
+6. Open Sidebar Organizer config.
+7. Select `Home Assistant config folder`.
+8. Confirm `/config/sidebar-organizer.yaml` is created.
+9. Change sidebar grouping/order.
+10. Save to HA config.
+11. Open a different browser/device and confirm the same sidebar config loads.
+12. Change the YAML file manually and reload from the UI.
+13. Confirm invalid YAML shows an error and does not break the sidebar.
 
 ---
 

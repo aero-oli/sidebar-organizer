@@ -27,17 +27,18 @@ import {
   setStorage,
   getStorageConfig,
   getHiddenPanels,
-  sidebarUseConfigFile,
   removeStorage,
+  getConfigSource,
+  setConfigSource,
 } from '@utilities/storage-utils';
 import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, css, TemplateResult, PropertyValues, CSSResultGroup, nothing } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
-
-import './editor';
 import YAML from 'yaml';
 
+import './editor';
+import { ConfigProviderInfo, ConfigSource, HomeAssistantConfigProvider } from '../config';
 import { BaseEditor } from './base-editor';
 import * as ELEMENT from './editor';
 import { EditorStore } from './editor-store';
@@ -57,6 +58,7 @@ export class SidebarConfigDialog extends BaseEditor {
   @state() _connected: boolean = false;
   @state() public _sidebarConfig = {} as SidebarConfig;
   @state() public _useConfigFile = false;
+  @state() public _configSource: ConfigSource = 'browser_storage';
 
   @state() public _tabState: TAB_STATE = TAB_STATE.BASE;
 
@@ -75,6 +77,8 @@ export class SidebarConfigDialog extends BaseEditor {
 
   @state() private _uploading = false;
   @state() _invalidConfig?: INVALID_CONFIG;
+  @state() private _haConfigErrors: string[] = [];
+  @state() private _haConfigInfo: ConfigProviderInfo = { available: false };
   @state() public _narrow = false;
 
   private _resizeObserver?: ResizeObserver;
@@ -95,9 +99,11 @@ export class SidebarConfigDialog extends BaseEditor {
   connectedCallback(): void {
     super.connectedCallback();
     this._connected = true;
-    this._useConfigFile = sidebarUseConfigFile();
-    this._tabState = this._useConfigFile === true ? TAB_STATE.CODE : TAB_STATE.BASE;
+    this._configSource = getConfigSource();
+    this._useConfigFile = this._configSource === 'static_yaml';
+    this._tabState = this._configSource !== 'browser_storage' ? TAB_STATE.CODE : TAB_STATE.BASE;
     this.addEventListener('sidebar-config-changed', this._sidebarConfigChanged as EventListener);
+    this._refreshHaConfigInfo();
     window.sidebarDialog = this;
   }
 
@@ -136,11 +142,18 @@ export class SidebarConfigDialog extends BaseEditor {
 
       this._setupInitConfig();
     }
+    if (_changedProperties.has('_configSource')) {
+      this._useConfigFile = this._configSource === 'static_yaml';
+      if (this._configSource !== 'browser_storage') {
+        this._tabState = TAB_STATE.CODE;
+      }
+    }
+
     if (_changedProperties.has('_useConfigFile')) {
-      if (this._useConfigFile) {
+      if (this._useConfigFile && this._configSource === 'static_yaml') {
         console.log('Use config file changed, validating config file');
         this._validateConfigFile();
-      } else if (!this._useConfigFile && this._invalidConfig !== undefined) {
+      } else if (this._configSource === 'browser_storage' && this._invalidConfig !== undefined) {
         console.log('Use config file changed to false, resetting invalid config');
         this._invalidConfig = undefined;
         this._validateStoragePanels();
@@ -297,8 +310,16 @@ export class SidebarConfigDialog extends BaseEditor {
   }
 
   public _setupInitConfig = async () => {
-    this._validateStoragePanels();
-    this._validateConfigFile();
+    this._configLoaded = false;
+    if (this._configSource === 'browser_storage') {
+      this._validateStoragePanels();
+      return;
+    }
+    if (this._configSource === 'static_yaml') {
+      this._validateConfigFile();
+      return;
+    }
+    this._validateHaConfig();
   };
 
   private _measureConfigSection() {
@@ -450,7 +471,7 @@ export class SidebarConfigDialog extends BaseEditor {
                   @sidebar-changed=${this._handleSidebarChanged}
                 ></sidebar-dialog-code-editor>
               `}
-        ${this._renderUseConfigFile()}
+        ${this._renderConfigSourceSettings()}
       </div>
     `;
   }
@@ -525,13 +546,22 @@ export class SidebarConfigDialog extends BaseEditor {
       </div>
     `;
   }
-  private _renderUseConfigFile() {
+  private _renderConfigSourceSettings() {
     const BTN_LABEL = TRANSLATED_LABEL.BTN_LABEL;
-    const useJsonFile = this._useConfigFile;
+    const source = this._configSource;
+    const useJsonFile = source === 'static_yaml';
+    const useHaConfig = source === 'home_assistant_config';
+    const haInfo = this._haConfigInfo;
 
     return html`
       <div class="overlay">
         <ha-alert alert-type="info" .hidden=${!useJsonFile}> ${ALERT_MSG.USE_CONFIG_FILE} </ha-alert>
+        <ha-alert alert-type=${haInfo.available ? 'info' : 'warning'} .hidden=${!useHaConfig}>
+          ${haInfo.available ? ALERT_MSG.HA_CONFIG_MODE : ALERT_MSG.HA_CONFIG_UNAVAILABLE}
+        </ha-alert>
+        ${useHaConfig && this._haConfigErrors.length > 0
+          ? html`<ha-alert alert-type="warning">${this._haConfigErrors.join(' ')}</ha-alert>`
+          : nothing}
         ${this._renderInvalidConfig()}
 
         <div class="header-row">
@@ -542,18 +572,40 @@ export class SidebarConfigDialog extends BaseEditor {
             @click=${() => this._uploadConfigFile()}
             >${BTN_LABEL.UPLOAD}</ha-button
           >
-          <ha-formfield label="Use YAML File" style="min-height: 48px;">
-            <ha-switch
-              .label=${BTN_LABEL.USE_CONFIG_FILE}
-              .checked=${useJsonFile}
-              @change=${(ev: Event) => {
-                const checked = (ev.target as HTMLInputElement).checked;
-                this._useConfigFile = checked;
-                setStorage(STORAGE.USE_CONFIG_FILE, checked);
-              }}
-            ></ha-switch>
-          </ha-formfield>
+          <label class="source-picker">
+            <span>Config source</span>
+            <select .value=${source} @change=${this._handleConfigSourceChange}>
+              <option value="browser_storage">Browser storage</option>
+              <option value="static_yaml">Static YAML file from /local</option>
+              <option value="home_assistant_config">Home Assistant config folder</option>
+            </select>
+          </label>
         </div>
+        ${useHaConfig
+          ? html`
+              <div class="ha-config-status">
+                <span>Backend status: ${haInfo.available ? 'available' : 'unavailable'}</span>
+                <span>Config path: ${haInfo.config_path || 'not reported'}</span>
+                <span>Last modified: ${this._formatLastModified(haInfo.last_modified)}</span>
+                <span>${haInfo.allow_write ? 'Write enabled' : 'Read-only'}</span>
+              </div>
+              <div class="ha-config-actions">
+                <ha-button appearance="plain" size="small" @click=${this._reloadHomeAssistantConfig}
+                  >Reload from HA config</ha-button
+                >
+                <ha-button
+                  appearance="plain"
+                  size="small"
+                  .disabled=${!haInfo.available || !haInfo.allow_write}
+                  @click=${this._saveHomeAssistantConfig}
+                  >Save to HA config</ha-button
+                >
+                <ha-button appearance="plain" size="small" @click=${this._validateHomeAssistantYaml}
+                  >Validate YAML</ha-button
+                >
+              </div>
+            `
+          : nothing}
       </div>
     `;
   }
@@ -593,6 +645,11 @@ export class SidebarConfigDialog extends BaseEditor {
             }
 
             this._sidebarConfig = newConfig;
+            if (this._configSource === 'home_assistant_config') {
+              await this._saveHomeAssistantConfig();
+              window.location.reload();
+              return;
+            }
             const resetConfigPromise = () =>
               new Promise<void>((resolve) => {
                 setStorage(STORAGE.UI_CONFIG, this._sidebarConfig);
@@ -623,7 +680,7 @@ export class SidebarConfigDialog extends BaseEditor {
   }
 
   private _validateStoragePanels = async (): Promise<void> => {
-    if (this._useConfigFile) return;
+    if (this._configSource !== 'browser_storage') return;
     const currentPanelOrder = JSON.parse(getStorage(STORAGE.PANEL_ORDER) || '[]');
 
     const hiddenItems = getHiddenPanels();
@@ -671,7 +728,7 @@ export class SidebarConfigDialog extends BaseEditor {
   };
 
   private _validateConfigFile = async (): Promise<void> => {
-    if (!this._useConfigFile) return;
+    if (this._configSource !== 'static_yaml') return;
     const config = await fetchFileConfig();
     if (!config) return;
 
@@ -681,6 +738,37 @@ export class SidebarConfigDialog extends BaseEditor {
       this._invalidConfig = result;
     }
     this._configLoaded = true;
+  };
+
+  private _validateHaConfig = async (): Promise<void> => {
+    if (this._configSource !== 'home_assistant_config') return;
+    await this._refreshHaConfigInfo();
+    if (!this._haConfigInfo.available) {
+      this._haConfigErrors = [this._haConfigInfo.error || ALERT_MSG.HA_CONFIG_UNAVAILABLE];
+      this._sidebarConfig = this._initConfig || {};
+      this._configLoaded = true;
+      this._mainDialog._configValid = false;
+      return;
+    }
+
+    const provider = new HomeAssistantConfigProvider(this.hass);
+    const result = await provider.read();
+    if (!result.valid || !result.config) {
+      this._haConfigErrors = result.errors;
+      this._sidebarConfig = this._initConfig || {};
+      this._configLoaded = true;
+      this._mainDialog._configValid = false;
+      return;
+    }
+
+    this._haConfigErrors = [];
+    this._sidebarConfig = result.config;
+    const validationResult = (await isItemsValid(result.config, this.hass, true)) as INVALID_CONFIG;
+    if (typeof validationResult === 'object' && validationResult !== null) {
+      this._invalidConfig = validationResult.valid ? undefined : validationResult;
+    }
+    const currentPanelOrder = JSON.parse(getStorage(STORAGE.PANEL_ORDER) || '[]');
+    this._updateSidebarItems(currentPanelOrder, getHiddenPanels());
   };
 
   private _sidebarConfigChanged(event: CustomEvent<ConfigChangedEvent>) {
@@ -725,8 +813,9 @@ export class SidebarConfigDialog extends BaseEditor {
           this._sidebarConfig = this._invalidConfig.config;
           this._invalidConfig = undefined;
           this._useConfigFile = false;
+          this._configSource = 'browser_storage';
           this._mainDialog._configValid = true;
-          setStorage(STORAGE.USE_CONFIG_FILE, false);
+          setConfigSource('browser_storage');
           setStorage(STORAGE.UI_CONFIG, this._sidebarConfig);
           this.requestUpdate();
         }
@@ -767,7 +856,9 @@ export class SidebarConfigDialog extends BaseEditor {
       );
 
       this._sidebarConfig = configToValidate;
-      setStorage(STORAGE.UI_CONFIG, this._sidebarConfig);
+      if (this._configSource === 'browser_storage') {
+        setStorage(STORAGE.UI_CONFIG, this._sidebarConfig);
+      }
     }
 
     // Filter out defaultPanel and 'lovelace' from the current panel order
@@ -785,6 +876,79 @@ export class SidebarConfigDialog extends BaseEditor {
     this._initPanelOrder = [..._sidebarItems];
     this._configLoaded = true;
   };
+
+  private _handleConfigSourceChange = async (ev: Event): Promise<void> => {
+    const source = (ev.target as HTMLSelectElement).value as ConfigSource;
+    this._configSource = source;
+    this._useConfigFile = source === 'static_yaml';
+    setConfigSource(source);
+    await this._setupInitConfig();
+    this.requestUpdate();
+  };
+
+  public _saveHomeAssistantConfig = async (): Promise<void> => {
+    await this._refreshHaConfigInfo();
+    if (!this._haConfigInfo.available) {
+      await showAlertDialog(this, ALERT_MSG.HA_CONFIG_UNAVAILABLE);
+      return;
+    }
+    if (!this._haConfigInfo.allow_write) {
+      await showAlertDialog(this, ALERT_MSG.HA_CONFIG_WRITE_DISABLED);
+      return;
+    }
+
+    const provider = new HomeAssistantConfigProvider(this.hass);
+    const yaml = YAML.stringify(this._sidebarConfig);
+    const validation = await provider.validate(yaml);
+    if (!validation.valid) {
+      this._haConfigErrors = validation.errors;
+      await showAlertDialog(this, `${ALERT_MSG.CONFIG_INVALID}\n${validation.errors.join('\n')}`);
+      return;
+    }
+
+    try {
+      this._haConfigInfo = await provider.write(yaml);
+      this._haConfigErrors = [];
+      setStorage(STORAGE.HA_CONFIG_CACHE, this._sidebarConfig);
+      await showAlertDialog(this, ALERT_MSG.HA_CONFIG_SAVE_SUCCESS, 'OK');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this._haConfigErrors = [message];
+      await showAlertDialog(this, message);
+    }
+  };
+
+  private _reloadHomeAssistantConfig = async (): Promise<void> => {
+    const provider = new HomeAssistantConfigProvider(this.hass);
+    const result = await provider.read();
+    if (!result.valid || !result.config) {
+      this._haConfigErrors = result.errors;
+      await showAlertDialog(this, `${ALERT_MSG.CONFIG_INVALID}\n${result.errors.join('\n')}`);
+      return;
+    }
+    this._sidebarConfig = result.config;
+    this._haConfigErrors = [];
+    setStorage(STORAGE.HA_CONFIG_CACHE, result.config);
+    await this._refreshHaConfigInfo();
+    await showAlertDialog(this, ALERT_MSG.HA_CONFIG_RELOAD_SUCCESS, 'OK');
+  };
+
+  private _validateHomeAssistantYaml = async (): Promise<void> => {
+    const provider = new HomeAssistantConfigProvider(this.hass);
+    const result = await provider.validate(YAML.stringify(this._sidebarConfig));
+    this._haConfigErrors = result.errors;
+    await showAlertDialog(this, result.valid ? ALERT_MSG.CONFIG_VALID : `${ALERT_MSG.CONFIG_INVALID}\n${result.errors.join('\n')}`);
+  };
+
+  private _refreshHaConfigInfo = async (): Promise<void> => {
+    const provider = new HomeAssistantConfigProvider(this.hass);
+    this._haConfigInfo = await provider.info();
+  };
+
+  private _formatLastModified(lastModified?: number | null): string {
+    if (!lastModified) return 'unknown';
+    return new Date(lastModified * 1000).toLocaleString();
+  }
 
   public get pickedItems(): string[] {
     return Array.from(this._panelConfigMap.values()).flat();

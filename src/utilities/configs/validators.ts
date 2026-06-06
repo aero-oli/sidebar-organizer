@@ -5,7 +5,7 @@ import { comparePanelItems } from '@utilities/dashboard';
 import { getDefaultPanelUrlPath } from '@utilities/panel';
 import { pick } from 'es-toolkit/compat';
 
-import { getHiddenPanels, getStorageConfig, setStorage, sidebarUseConfigFile } from '../storage-utils';
+import { getConfigSource, getHiddenPanels, getStorageConfig, setStorage } from '../storage-utils';
 
 export interface BASE_VALIDATION_RESULT {
   valid: boolean;
@@ -200,7 +200,7 @@ export const tryCorrectConfig = async (
 };
 
 export const _changeStorageConfig = (config: SidebarConfig): void => {
-  if (sidebarUseConfigFile()) return;
+  if (getConfigSource() !== 'browser_storage') return;
 
   const currentConfig = getStorageConfig();
   const isConfigDifferent = JSON.stringify(currentConfig) !== JSON.stringify(config);

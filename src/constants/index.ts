@@ -31,6 +31,8 @@ export enum TAB_STATE {
 export enum STORAGE {
   UI_CONFIG = 'sidebarOrganizerConfig',
   USE_CONFIG_FILE = 'sidebarOrganizerUseConfigFile',
+  CONFIG_SOURCE = 'sidebarOrganizerConfigSource',
+  HA_CONFIG_CACHE = 'sidebarOrganizerHaConfigCache',
   PANEL_ORDER = 'sidebarPanelOrder',
   COLLAPSE = 'sidebarCollapsedGroups',
   HIDDEN_PANELS = 'sidebarHiddenPanels',
@@ -94,6 +96,13 @@ export const ALERT_MSG = {
     'You can edit invalid items in the editor and validate the configuration again. You can also upload a new config file.',
   CONFIG_EMPTY: 'You dont have any configuration yet.',
   USE_CONFIG_FILE: `Currently Sidebar Organizer uses the config file. If config is valid, you can save and migrate it to the browser's local storage.`,
+  HA_CONFIG_MODE:
+    'Home Assistant config-folder mode reads and writes the shared YAML file through the optional backend integration.',
+  HA_CONFIG_UNAVAILABLE:
+    'Home Assistant config-folder mode requires the optional `sidebar_organizer` backend integration to be installed under `custom_components/sidebar_organizer` and enabled in configuration.yaml.',
+  HA_CONFIG_WRITE_DISABLED: 'Writing to the Home Assistant config file is disabled by the backend integration.',
+  HA_CONFIG_RELOAD_SUCCESS: 'Reloaded Sidebar Organizer config from Home Assistant config folder.',
+  HA_CONFIG_SAVE_SUCCESS: 'Saved Sidebar Organizer config to Home Assistant config folder.',
   NAME_EXISTS: 'The name already exists. Choose another name.',
   CONFIRM_DELETE: 'Are you sure you want to delete the current configuration?',
   NOT_COMPATIBLE: 'Sidebar Organizer is not compatible with this version of Home Assistant',

@@ -1,3 +1,5 @@
+import type { ConfigSource } from './config';
+
 import {
   ALERT_MSG,
   ATTRIBUTE,
@@ -52,7 +54,7 @@ import {
   getDefaultPanelUrlPath,
   createHaTooltipForItem,
 } from '@utilities/panel';
-import { setStorage, sidebarUseConfigFile } from '@utilities/storage-utils';
+import { getConfigSource, setStorage } from '@utilities/storage-utils';
 import { hasTemplate, subscribeRenderTemplate } from '@utilities/ws-templates';
 import { getPromisableResult, PromisableOptions } from 'get-promisable-result';
 import { HAElement, HAQuerySelector, HAQuerySelectorEvent, OnListenDetail } from 'home-assistant-query-selector';
@@ -180,8 +182,8 @@ export class SidebarOrganizer {
 
   get _hasSidebarConfig(): boolean {
     const sidebarConfig = localStorage.getItem(STORAGE.UI_CONFIG);
-    const useConfigFile = sidebarUseConfigFile();
-    return useConfigFile || (sidebarConfig !== null && sidebarConfig !== undefined);
+    const source = getConfigSource();
+    return source !== 'browser_storage' || (sidebarConfig !== null && sidebarConfig !== undefined);
   }
 
   get _pluginConfigured(): boolean {
@@ -507,7 +509,7 @@ export class SidebarOrganizer {
         break;
       case HA_EVENT.SIDEBAR_CONFIG_SAVED:
         console.log('Sidebar Config Saved Event:', detail);
-        this._handleNewConfig(detail.config, detail.useConfigFile);
+        this._handleNewConfig(detail.config, detail.useConfigFile, detail.configSource);
         break;
     }
   }
@@ -981,9 +983,9 @@ export class SidebarOrganizer {
     return contentDiv;
   };
 
-  private _handleNewConfig(config: SidebarConfig, useConfigFile: boolean) {
-    if (useConfigFile) {
-      console.log('Using Config File');
+  private _handleNewConfig(config: SidebarConfig, useConfigFile: boolean, configSource?: ConfigSource) {
+    if (useConfigFile || configSource === 'home_assistant_config') {
+      console.log('Using shared config source');
       this._reloadWindow();
       return;
     }

@@ -1,0 +1,64 @@
+"""Sidebar Organizer backend integration."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import voluptuous as vol
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
+
+from .const import (
+    CONF_ALLOW_WRITE,
+    CONF_CONFIG_PATH,
+    CONF_CREATE_IF_MISSING,
+    DEFAULT_ALLOW_WRITE,
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_CREATE_IF_MISSING,
+    DOMAIN,
+)
+from .helpers import DEFAULT_CONFIG_YAML, atomic_write_text, resolve_config_path
+from .websocket_api import async_register_websocket_commands
+
+_LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = vol.Schema(
+    {
+        DOMAIN: vol.Schema(
+            {
+                vol.Optional(CONF_CONFIG_PATH, default=DEFAULT_CONFIG_PATH): cv.string,
+                vol.Optional(CONF_ALLOW_WRITE, default=DEFAULT_ALLOW_WRITE): cv.boolean,
+                vol.Optional(CONF_CREATE_IF_MISSING, default=DEFAULT_CREATE_IF_MISSING): cv.boolean,
+            }
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Set up the Sidebar Organizer integration from YAML."""
+    integration_config = config.get(DOMAIN, {})
+    config_path = integration_config.get(CONF_CONFIG_PATH, DEFAULT_CONFIG_PATH)
+    allow_write = integration_config.get(CONF_ALLOW_WRITE, DEFAULT_ALLOW_WRITE)
+    create_if_missing = integration_config.get(CONF_CREATE_IF_MISSING, DEFAULT_CREATE_IF_MISSING)
+
+    try:
+        resolved_path = resolve_config_path(hass.config.path(), config_path)
+    except ValueError as err:
+        _LOGGER.error("Invalid Sidebar Organizer config_path %r: %s", config_path, err)
+        return False
+
+    hass.data[DOMAIN] = {
+        CONF_CONFIG_PATH: str(resolved_path),
+        CONF_ALLOW_WRITE: allow_write,
+        CONF_CREATE_IF_MISSING: create_if_missing,
+    }
+
+    if not resolved_path.exists() and create_if_missing:
+        await hass.async_add_executor_job(atomic_write_text, resolved_path, DEFAULT_CONFIG_YAML)
+
+    async_register_websocket_commands(hass)
+    return True
+

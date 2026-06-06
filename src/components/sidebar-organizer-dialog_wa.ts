@@ -14,6 +14,7 @@ import { cloneDeep, isEmpty } from 'es-toolkit/compat';
 import { CSSResultGroup, LitElement, TemplateResult, css, html, nothing } from 'lit';
 import { customElement, property, query, state } from 'lit/decorators.js';
 
+import { ConfigSource } from '../config';
 import { HA, SidebarConfig } from '../types';
 import { HassDialog } from '../types/dialog-manager';
 import { fireEvent } from '../utilities/fire_event';
@@ -118,11 +119,15 @@ export class SidebarOrganizerDialogWA extends LitElement implements HassDialog<S
       await this._configDialog._handleInvalidConfig('save');
       // After saving to storage, _useConfigFile will be set to false by _handleInvalidConfig
       // Continue with the rest of the save logic below
+    } else if (this._configDialog._configSource === 'home_assistant_config' && this._configValid) {
+      await this._configDialog._saveHomeAssistantConfig();
     }
     const config = this._configDialog!._sidebarConfig;
     const useConfigFile = this._configDialog!._useConfigFile;
+    const configSource = this._configDialog!._configSource;
     const detail = {
       config,
+      configSource,
       useConfigFile: useConfigFile,
     };
 
@@ -331,7 +336,7 @@ declare global {
     'sidebar-organizer-dialog-wa': SidebarOrganizerDialogWA;
   }
   interface HASSDomEvents {
-    'save-sidebar-organizer-config': { config: SidebarConfig; useConfigFile: boolean };
+    'save-sidebar-organizer-config': { config: SidebarConfig; configSource?: ConfigSource; useConfigFile: boolean };
   }
   interface Window {
     _sidebarOrganizerDialogWA?: SidebarOrganizerDialogWA;
