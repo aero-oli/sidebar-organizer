@@ -3,7 +3,8 @@ import { HaExtened, SidebarConfig } from '@types';
 import YAML from 'yaml';
 
 import { HomeAssistantConfigProvider } from '../../config/providers/ha-config-provider';
-import { getConfigSource, getStorageConfig, setStorage } from '../storage-utils';
+import { resolvePreferredConfigSource } from '../../config/source';
+import { getConfigSource, getStorageConfig, setConfigSource, setStorage } from '../storage-utils';
 import { _changeStorageConfig, isItemsValid, tryCorrectConfig, validateConfig } from './validators';
 
 const randomId = (): string => Math.random().toString(16).slice(2);
@@ -24,7 +25,8 @@ export const fetchFileConfig = async (): Promise<SidebarConfig | undefined> => {
 };
 
 export const fetchConfig = async (hass: HaExtened['hass']): Promise<SidebarConfig | undefined> => {
-  const source = getConfigSource();
+  const source = await resolvePreferredConfigSource(hass, getConfigSource());
+  setConfigSource(source);
   let config =
     source === 'home_assistant_config'
       ? await fetchHaConfig(hass)

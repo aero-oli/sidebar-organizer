@@ -32,6 +32,7 @@ import {
   getConfigSource,
   setConfigSource,
 } from '@utilities/storage-utils';
+import { showToast } from '@utilities/toast-notify';
 import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, css, TemplateResult, PropertyValues, CSSResultGroup, nothing } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
@@ -39,7 +40,13 @@ import { styleMap } from 'lit/directives/style-map.js';
 import YAML from 'yaml';
 
 import './editor';
-import { ConfigProviderInfo, ConfigSource, HomeAssistantConfigProvider, isHaConfigModified } from '../config';
+import {
+  ConfigProviderInfo,
+  ConfigSource,
+  HomeAssistantConfigProvider,
+  isHaConfigModified,
+  resolvePreferredConfigSource,
+} from '../config';
 import { BaseEditor } from './base-editor';
 import * as ELEMENT from './editor';
 import { EditorStore } from './editor-store';
@@ -106,7 +113,7 @@ export class SidebarConfigDialog extends BaseEditor {
     this._connected = true;
     this._configSource = getConfigSource();
     this._useConfigFile = this._configSource === 'static_yaml';
-    this._tabState = this._configSource !== 'browser_storage' ? TAB_STATE.CODE : TAB_STATE.BASE;
+    this._tabState = this._configSource === 'static_yaml' ? TAB_STATE.CODE : TAB_STATE.BASE;
     this.addEventListener('sidebar-config-changed', this._sidebarConfigChanged as EventListener);
     this._refreshHaConfigInfo();
     this._startHaConfigPolling();
@@ -152,7 +159,7 @@ export class SidebarConfigDialog extends BaseEditor {
     }
     if (_changedProperties.has('_configSource')) {
       this._useConfigFile = this._configSource === 'static_yaml';
-      if (this._configSource !== 'browser_storage') {
+      if (this._configSource === 'static_yaml') {
         this._tabState = TAB_STATE.CODE;
       }
       this._startHaConfigPolling();
@@ -320,6 +327,12 @@ export class SidebarConfigDialog extends BaseEditor {
 
   public _setupInitConfig = async () => {
     this._configLoaded = false;
+    const source = await resolvePreferredConfigSource(this.hass, getConfigSource());
+    if (source !== this._configSource) {
+      this._configSource = source;
+      this._useConfigFile = source === 'static_yaml';
+      setConfigSource(source);
+    }
     if (this._configSource === 'browser_storage') {
       this._validateStoragePanels();
       return;
@@ -559,7 +572,6 @@ export class SidebarConfigDialog extends BaseEditor {
     `;
   }
   private _renderConfigSourceSettings() {
-    const BTN_LABEL = TRANSLATED_LABEL.BTN_LABEL;
     const source = this._configSource;
     const useJsonFile = source === 'static_yaml';
     const useHaConfig = source === 'home_assistant_config';
@@ -582,36 +594,33 @@ export class SidebarConfigDialog extends BaseEditor {
           : nothing}
         ${this._renderInvalidConfig()}
 
-        <div class="header-row">
-          <ha-button
-            appearance="filled"
-            size="small"
-            .label=${BTN_LABEL.UPLOAD}
-            @click=${() => this._uploadConfigFile()}
-            >${BTN_LABEL.UPLOAD}</ha-button
-          >
-          <div class="source-picker" role="group" aria-label="Config source">
-            ${this._renderSourceButton('browser_storage', 'Browser storage', 'mdi:database')}
-            ${this._renderSourceButton('static_yaml', '/local YAML', 'mdi:file-code-outline')}
-            ${this._renderSourceButton('home_assistant_config', 'HA config folder', 'mdi:home-assistant')}
-          </div>
-        </div>
+        ${this._renderSyncStatus(haInfo, useHaConfig, useJsonFile)}
         ${useHaConfig ? this._renderHaDiagnostics(haInfo) : nothing}
       </div>
     `;
   }
 
-  private _renderSourceButton(source: ConfigSource, label: string, icon: string): TemplateResult {
-    const selected = this._configSource === source;
+  private _renderSyncStatus(info: ConfigProviderInfo, useHaConfig: boolean, useJsonFile: boolean): TemplateResult {
+    const BTN_LABEL = TRANSLATED_LABEL.BTN_LABEL;
+    const label = useHaConfig
+      ? info.allow_write
+        ? 'Synced to Home Assistant config'
+        : 'Home Assistant config is read-only'
+      : useJsonFile
+        ? 'Using legacy /local YAML'
+        : 'Using browser storage fallback';
+    const icon = useHaConfig ? 'mdi:sync' : useJsonFile ? 'mdi:file-code-outline' : 'mdi:database';
+
     return html`
-      <ha-button
-        appearance=${selected ? 'filled' : 'plain'}
-        size="small"
-        @click=${() => this._setConfigSource(source)}
-      >
-        <ha-icon .icon=${icon}></ha-icon>
-        ${label}
-      </ha-button>
+      <div class="header-row">
+        <div class="sync-status">
+          <ha-icon .icon=${icon}></ha-icon>
+          <span>${label}</span>
+        </div>
+        <ha-button appearance="plain" size="small" .label=${BTN_LABEL.UPLOAD} @click=${() => this._uploadConfigFile()}
+          >${BTN_LABEL.UPLOAD}</ha-button
+        >
+      </div>
     `;
   }
 
@@ -627,13 +636,6 @@ export class SidebarConfigDialog extends BaseEditor {
       <div class="ha-config-actions">
         <ha-button appearance="plain" size="small" @click=${this._reloadHomeAssistantConfig}
           >Reload from HA config</ha-button
-        >
-        <ha-button
-          appearance="plain"
-          size="small"
-          .disabled=${!info.available || !info.allow_write}
-          @click=${this._saveHomeAssistantConfig}
-          >Save to HA config</ha-button
         >
         <ha-button appearance="plain" size="small" @click=${this._validateHomeAssistantYaml}>Validate YAML</ha-button>
       </div>
@@ -719,6 +721,9 @@ export class SidebarConfigDialog extends BaseEditor {
   private _handleRawYamlChanged(event: CustomEvent<{ yaml: string }>): void {
     event.stopPropagation();
     this._rawYaml = event.detail.yaml;
+    if (this._configSource === 'home_assistant_config') {
+      this._mainDialog._saveDisabled = false;
+    }
   }
 
   private _validateStoragePanels = async (): Promise<void> => {
@@ -922,28 +927,15 @@ export class SidebarConfigDialog extends BaseEditor {
     this._configLoaded = true;
   };
 
-  private _setConfigSource = async (source: ConfigSource): Promise<void> => {
-    this._configSource = source;
-    this._useConfigFile = source === 'static_yaml';
-    setConfigSource(source);
-    if (source !== 'home_assistant_config') {
-      this._haDiagnostics = undefined;
-      this._lastLoadedHaConfigModified = undefined;
-      this._rawYaml = '';
-    }
-    await this._setupInitConfig();
-    this.requestUpdate();
-  };
-
-  public _saveHomeAssistantConfig = async (): Promise<void> => {
+  public _saveHomeAssistantConfig = async (): Promise<boolean> => {
     await this._refreshHaConfigInfo();
     if (!this._haConfigInfo.available) {
       await showAlertDialog(this, ALERT_MSG.HA_CONFIG_UNAVAILABLE);
-      return;
+      return false;
     }
     if (!this._haConfigInfo.allow_write) {
       await showAlertDialog(this, ALERT_MSG.HA_CONFIG_WRITE_DISABLED);
-      return;
+      return false;
     }
 
     const provider = new HomeAssistantConfigProvider(this.hass);
@@ -957,7 +949,7 @@ export class SidebarConfigDialog extends BaseEditor {
         'Cancel'
       ))
     ) {
-      return;
+      return false;
     }
 
     const yaml = this._rawYaml.trim() ? this._rawYaml : YAML.stringify(this._sidebarConfig);
@@ -965,7 +957,7 @@ export class SidebarConfigDialog extends BaseEditor {
     if (!validation.valid) {
       this._haConfigErrors = validation.errors;
       await showAlertDialog(this, `${ALERT_MSG.CONFIG_INVALID}\n${validation.errors.join('\n')}`);
-      return;
+      return false;
     }
 
     try {
@@ -978,15 +970,17 @@ export class SidebarConfigDialog extends BaseEditor {
       if (this._haConfigInfo.last_modified != null) {
         setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, this._haConfigInfo.last_modified);
       }
-      await showAlertDialog(this, ALERT_MSG.HA_CONFIG_SAVE_SUCCESS, 'OK');
+      showToast(this, { message: ALERT_MSG.HA_CONFIG_SAVE_SUCCESS });
+      return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this._haConfigErrors = [message];
       await showAlertDialog(this, message);
+      return false;
     }
   };
 
-  private _reloadHomeAssistantConfig = async (): Promise<void> => {
+  private _reloadHomeAssistantConfig = async (showMessage = true): Promise<void> => {
     const provider = new HomeAssistantConfigProvider(this.hass);
     const result = await provider.read();
     if (!result.valid || !result.config) {
@@ -1003,7 +997,9 @@ export class SidebarConfigDialog extends BaseEditor {
       setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, result.last_modified);
     }
     await this._refreshHaConfigInfo();
-    await showAlertDialog(this, ALERT_MSG.HA_CONFIG_RELOAD_SUCCESS, 'OK');
+    if (showMessage) {
+      showToast(this, { message: ALERT_MSG.HA_CONFIG_RELOAD_SUCCESS });
+    }
   };
 
   private _validateHomeAssistantYaml = async (): Promise<void> => {
@@ -1041,9 +1037,14 @@ export class SidebarConfigDialog extends BaseEditor {
 
     this._haConfigInfo = info;
     this._haDiagnostics = { ...this._haDiagnostics, ...info };
+    if (this._mainDialog._saveDisabled) {
+      await this._reloadHomeAssistantConfig();
+      return;
+    }
+
     const reload = await showConfirmDialog(
       this,
-      'The Home Assistant config file changed on disk. Reload it now?',
+      'The Home Assistant config file changed on disk and you have unsaved edits. Reload it now?',
       'Reload',
       'Later'
     );
@@ -1260,17 +1261,13 @@ export class SidebarConfigDialog extends BaseEditor {
           --mdc-icon-button-size: 42px;
           gap: var(--side-dialog-gutter);
         }
-        .source-picker {
-          display: flex;
-          flex-wrap: wrap;
-          gap: var(--side-dialog-gutter);
-          justify-content: flex-end;
-        }
-        .source-picker ha-button {
-          --mdc-icon-size: 18px;
-        }
-        .source-picker ha-icon {
-          margin-inline-end: 0.35rem;
+        .sync-status {
+          align-items: center;
+          color: var(--secondary-text-color);
+          display: inline-flex;
+          font-size: 0.9rem;
+          gap: 6px;
+          min-width: 0;
         }
         .header-row.center {
           justify-content: center;

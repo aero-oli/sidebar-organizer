@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 
 import { isHaConfigModified } from '../../src/config/ha-config-refresh';
 import { HomeAssistantConfigProvider } from '../../src/config/providers/ha-config-provider';
+import { resolvePreferredConfigSource } from '../../src/config/source';
 import { parseSidebarYamlConfig } from '../../src/config/validation';
 import { defineCustomElementSafely } from '../../src/utilities/safe-custom-element';
 import { claimSidebarOrganizerModuleLoad } from '../../src/utilities/module-load-guard';
@@ -147,6 +148,35 @@ describe('HomeAssistantConfigProvider', () => {
     } as never);
 
     assert.equal(await provider.lastModified(), 123);
+  });
+});
+
+describe('resolvePreferredConfigSource', () => {
+  it('uses Home Assistant config folder automatically when the backend is available', async () => {
+    const source = await resolvePreferredConfigSource(
+      {
+        callWS: async (message: Record<string, unknown>) => {
+          assert.equal(message.type, 'sidebar_organizer/config/info');
+          return { available: true, allow_write: true };
+        },
+      } as never,
+      'browser_storage'
+    );
+
+    assert.equal(source, 'home_assistant_config');
+  });
+
+  it('keeps the existing legacy source when the backend is unavailable', async () => {
+    const source = await resolvePreferredConfigSource(
+      {
+        callWS: async () => {
+          throw new Error('Unknown command.');
+        },
+      } as never,
+      'static_yaml'
+    );
+
+    assert.equal(source, 'static_yaml');
   });
 });
 

@@ -73,7 +73,7 @@ If you have not disabled [My Home Assistant], click the button below to add this
 1. Restart Home Assistant.
 1. Go to Settings -> Devices & services -> Add integration -> Sidebar Organizer.
 1. Choose the private config path, normally `sidebar-organizer.yaml`.
-1. Open the Sidebar Organizer dialog and select `Home Assistant config folder`.
+1. Open the Sidebar Organizer dialog. If the backend integration is available, Sidebar Organizer uses the Home Assistant config file automatically.
 
 Sidebar Organizer v4.0.4 and newer is packaged as a Home Assistant custom integration. The integration serves and loads the frontend module automatically, so you do not need a separate Dashboard resource or `frontend.extra_module_url` entry.
 
@@ -261,11 +261,13 @@ In this section, you can organize the layout of the sidebar panels by customizin
 
 - This section lets you edit the raw YAML configuration used by Sidebar Organizer. You can also download the current configuration as a YAML file.
 
-- Sidebar Organizer supports three config sources:
+- Sidebar Organizer supports three config backends:
 
-  - `Browser storage`: the existing local browser storage behavior.
-  - `Static YAML file from /local`: the existing `/config/www/sidebar-organizer.yaml` file, served as `/local/sidebar-organizer.yaml`.
-  - `Home Assistant config folder`: the integration reads and writes a private config-folder YAML file through authenticated Home Assistant WebSocket commands.
+  - Home Assistant config folder: preferred when the integration is installed. The integration reads and writes a private config-folder YAML file through authenticated Home Assistant WebSocket commands.
+  - Browser storage: fallback for legacy frontend-only installs or when the backend is unavailable.
+  - Static YAML file from `/local`: legacy fallback for existing `/config/www/sidebar-organizer.yaml` setups.
+
+- The settings dialog no longer asks each browser to choose a source. When the backend integration is available, it is selected automatically and the footer `Save` button writes the shared Home Assistant config file and applies the sidebar update.
 
 - The static `/local` file is useful for sharing one file URL, but `/config/www` is a public/static frontend resource path. It is not the same as private config-folder storage.
 
@@ -277,14 +279,14 @@ In this section, you can organize the layout of the sidebar panels by customizin
 
 ## Home Assistant config-folder mode
 
-When `home_assistant_config` is selected in the config dialog, Sidebar Organizer calls the backend WebSocket API:
+When the Sidebar Organizer backend integration is available, Sidebar Organizer calls the backend WebSocket API:
 
 - `sidebar_organizer/config/info`
 - `sidebar_organizer/config/read`
 - `sidebar_organizer/config/validate`
 - `sidebar_organizer/config/write`
 
-The YAML file becomes the source of truth for all browsers, devices, and users because it is read from Home Assistant itself. Browser storage may keep a last-good fallback copy, but it is not treated as the source of truth in this mode.
+The YAML file becomes the source of truth for all browsers, devices, and users because it is read from Home Assistant itself. Browser storage may keep a last-good fallback copy, but it is not treated as the source of truth in this mode. The dialog has one save path: edit visually or in YAML, then press the footer `Save` button.
 
 Example `/config/sidebar-organizer.yaml`:
 
@@ -324,7 +326,7 @@ Security notes:
 | --- | --- | --- |
 | Backend unavailable | Integration not configured or Home Assistant not restarted | Add Sidebar Organizer in Settings -> Devices & services and restart |
 | Duplicate custom element log | Old Dashboard resource still loaded | Remove `/hacsfiles/sidebar-organizer/sidebar-organizer.js` and old `/local/sidebar-organizer.js` resources |
-| YAML edits do not show | Browser has not reloaded backend config | Use Reload from HA config, reopen the dialog, or wait for the external-change prompt |
+| YAML edits do not show | Browser has not reloaded backend config yet | Focus the tab, wait for the automatic reload check, or use Reload from HA config in the dialog |
 | Cannot save | `allow_write` is false or the user is not admin | Enable write in integration options and sign in as an admin user |
 | File missing | `create_if_missing` is false | Create the file manually or enable create option |
 | Stale frontend after update | Browser or Home Assistant frontend cache | Hard refresh, clear HA frontend cache, and remove old Dashboard resources |
@@ -338,10 +340,10 @@ Manual test checklist:
 4. Restart Home Assistant.
 5. Add Sidebar Organizer in Settings -> Devices & services.
 6. Open Sidebar Organizer config.
-7. Select `Home Assistant config folder`.
+7. Confirm the status panel shows the Home Assistant config file path.
 8. Confirm `/config/sidebar-organizer.yaml` is created.
 9. Change sidebar grouping/order.
-10. Save to HA config.
+10. Press the dialog footer `Save` button.
 11. Open a different browser/device and confirm the same sidebar config loads.
 12. Change the YAML file manually and reload from the UI or wait for the external-change prompt.
 13. Confirm invalid YAML shows an error and does not break the sidebar.

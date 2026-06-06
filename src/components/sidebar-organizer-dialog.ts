@@ -112,7 +112,7 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
 
   private _showSuccessToast(): void {
     showToast(this, {
-      message: 'Test config saved successfully.',
+      message: 'Sidebar Organizer config saved.',
     });
   }
 
@@ -131,7 +131,8 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
       // After saving to storage, _useConfigFile will be set to false by _handleInvalidConfig
       // Continue with the rest of the save logic below
     } else if (this._configDialog._configSource === 'home_assistant_config' && this._configValid) {
-      await this._configDialog._saveHomeAssistantConfig();
+      const saved = await this._configDialog._saveHomeAssistantConfig();
+      if (!saved) return;
     }
     const config = this._configDialog!._sidebarConfig;
     const useConfigFile = this._configDialog!._useConfigFile;
