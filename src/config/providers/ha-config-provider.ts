@@ -14,6 +14,17 @@ interface HaConfigReadResponse extends ConfigProviderInfo {
 export class HomeAssistantConfigProvider implements SidebarConfigProvider {
   constructor(private readonly hass: HassWithCallWS) {}
 
+  async diagnostics(): Promise<ConfigProviderInfo> {
+    try {
+      return await this.hass.callWS<ConfigProviderInfo>({ type: 'sidebar_organizer/config/diagnostics' });
+    } catch (err) {
+      return {
+        available: false,
+        error: this._errorMessage(err),
+      };
+    }
+  }
+
   async info(): Promise<ConfigProviderInfo> {
     try {
       return await this.hass.callWS<ConfigProviderInfo>({ type: 'sidebar_organizer/config/info' });
@@ -32,16 +43,21 @@ export class HomeAssistantConfigProvider implements SidebarConfigProvider {
       const parsed = parseSidebarYamlConfig(rawYaml);
 
       if (response.valid === false && response.errors?.length) {
-        return { ...parsed, errors: response.errors, last_modified: response.last_modified, valid: false };
+        return { ...parsed, errors: response.errors, last_modified: response.last_modified, rawYaml, valid: false };
       }
 
-      return { ...parsed, last_modified: response.last_modified };
+      return { ...parsed, last_modified: response.last_modified, rawYaml };
     } catch (err) {
       return {
         errors: [this._errorMessage(err)],
         valid: false,
       };
     }
+  }
+
+  async lastModified(): Promise<number | undefined> {
+    const info = await this.info();
+    return typeof info.last_modified === 'number' ? info.last_modified : undefined;
   }
 
   async validate(yaml: string): Promise<{ errors: string[]; valid: boolean }> {

@@ -68,14 +68,16 @@ If you have not disabled [My Home Assistant], click the button below to add this
 
 ### Install the integration
 
-1. Go to HACS page on your Home Assistant instance
-1. Search for `Sidebar Organizer`
-1. Select Sidebar Organizer repo and install it as an `Integration`
-1. Add the backend configuration to `configuration.yaml`
-1. Restart Home Assistant
-1. Open Sidebar Organizer and select `Home Assistant config folder` as the config source
+1. Add `aero-oli/sidebar-organizer` to HACS as category `Integration`.
+1. Install Sidebar Organizer.
+1. Restart Home Assistant.
+1. Go to Settings -> Devices & services -> Add integration -> Sidebar Organizer.
+1. Choose the private config path, normally `sidebar-organizer.yaml`.
+1. Open the Sidebar Organizer dialog and select `Home Assistant config folder`.
 
 Sidebar Organizer v4.0.4 and newer is packaged as a Home Assistant custom integration. The integration serves and loads the frontend module automatically, so you do not need a separate Dashboard resource or `frontend.extra_module_url` entry.
+
+YAML setup is still supported for users who prefer `configuration.yaml`:
 
 ```yaml
 sidebar_organizer:
@@ -96,8 +98,8 @@ sidebar_organizer:
 
 1. Download the release source archive.
 2. Copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`.
-3. Add the `sidebar_organizer:` YAML block shown above to `configuration.yaml`.
-4. Restart Home Assistant.
+3. Restart Home Assistant.
+4. Go to Settings -> Devices & services -> Add integration -> Sidebar Organizer.
 
 </details>
 
@@ -269,6 +271,8 @@ In this section, you can organize the layout of the sidebar panels by customizin
 
 - The Home Assistant config-folder mode uses the `sidebar_organizer` backend integration. The frontend does not send arbitrary file paths by default; the backend owns the configured path.
 
+- See [Sidebar Organizer YAML Schema](docs/sidebar-organizer-config-schema.md) for the validation contract shared by the frontend and backend.
+
   ![Config RAW Code](assets/config-raw-code.png)
 
 ## Home Assistant config-folder mode
@@ -314,29 +318,32 @@ Security notes:
 - Write operations require `allow_write: true` and an admin Home Assistant user.
 - `config_path` is validated server-side and must resolve inside the Home Assistant config directory.
 
-Troubleshooting:
+## Troubleshooting
 
-- Backend unavailable: make sure Sidebar Organizer is installed in HACS as an `Integration`, not as a `Dashboard` resource. For manual installs, copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`, add `sidebar_organizer:` to `configuration.yaml`, then restart Home Assistant.
-- Invalid YAML: use `Validate YAML` in the config dialog or check the Home Assistant log. Invalid YAML is reported and should not crash the sidebar.
-- File missing: set `create_if_missing: true` or create the file manually.
-- Write disabled: set `allow_write: true` and restart Home Assistant.
-- Non-admin user cannot write: sign in with an admin user for save operations.
-- Browser still showing stale sidebar: reload from HA config, then hard refresh the browser. If you upgraded from the old frontend plugin install, remove the old Dashboard resource and `frontend.extra_module_url` entry so the frontend is not loaded twice.
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| Backend unavailable | Integration not configured or Home Assistant not restarted | Add Sidebar Organizer in Settings -> Devices & services and restart |
+| Duplicate custom element log | Old Dashboard resource still loaded | Remove `/hacsfiles/sidebar-organizer/sidebar-organizer.js` and old `/local/sidebar-organizer.js` resources |
+| YAML edits do not show | Browser has not reloaded backend config | Use Reload from HA config, reopen the dialog, or wait for the external-change prompt |
+| Cannot save | `allow_write` is false or the user is not admin | Enable write in integration options and sign in as an admin user |
+| File missing | `create_if_missing` is false | Create the file manually or enable create option |
+| Stale frontend after update | Browser or Home Assistant frontend cache | Hard refresh, clear HA frontend cache, and remove old Dashboard resources |
+| Invalid YAML | YAML parses incorrectly or uses unsupported field shapes | Use Validate YAML and compare with the schema document |
 
 Manual test checklist:
 
 1. Build frontend: `pnpm install` then `pnpm run build`.
 2. Install the release through HACS as an `Integration`, or copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`.
-3. Add `sidebar_organizer:` config to `configuration.yaml`.
-4. Remove any old Dashboard resource or `frontend.extra_module_url` entry for Sidebar Organizer.
-5. Restart Home Assistant.
+3. Remove any old Dashboard resource or `frontend.extra_module_url` entry for Sidebar Organizer.
+4. Restart Home Assistant.
+5. Add Sidebar Organizer in Settings -> Devices & services.
 6. Open Sidebar Organizer config.
 7. Select `Home Assistant config folder`.
 8. Confirm `/config/sidebar-organizer.yaml` is created.
 9. Change sidebar grouping/order.
 10. Save to HA config.
 11. Open a different browser/device and confirm the same sidebar config loads.
-12. Change the YAML file manually and reload from the UI.
+12. Change the YAML file manually and reload from the UI or wait for the external-change prompt.
 13. Confirm invalid YAML shows an error and does not break the sidebar.
 
 ---

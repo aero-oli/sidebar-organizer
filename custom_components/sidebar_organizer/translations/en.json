@@ -1,3 +1,38 @@
 {
-  "title": "Sidebar Organizer"
+  "title": "Sidebar Organizer",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sidebar Organizer",
+        "description": "Configure the private Home Assistant config-folder YAML file used by Sidebar Organizer.",
+        "data": {
+          "config_path": "Config path",
+          "allow_write": "Allow writing from the UI",
+          "create_if_missing": "Create the file if missing"
+        }
+      }
+    },
+    "error": {
+      "invalid_path": "The config path must resolve inside the Home Assistant config directory."
+    },
+    "abort": {
+      "already_configured": "Sidebar Organizer is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sidebar Organizer options",
+        "description": "Update the private config-folder YAML settings.",
+        "data": {
+          "config_path": "Config path",
+          "allow_write": "Allow writing from the UI",
+          "create_if_missing": "Create the file if missing"
+        }
+      }
+    },
+    "error": {
+      "invalid_path": "The config path must resolve inside the Home Assistant config directory."
+    }
+  }
 }

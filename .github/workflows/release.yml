@@ -24,6 +24,10 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install
+      - name: Verify
+        run: pnpm run verify
+      - name: Check clean generated bundle
+        run: git diff --exit-code custom_components/sidebar_organizer/frontend/sidebar-organizer.js
       - name: Release
         run: npx semantic-release
         env:

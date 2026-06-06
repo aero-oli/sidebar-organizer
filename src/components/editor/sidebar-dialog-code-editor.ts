@@ -1,3 +1,5 @@
+import type { ConfigSource } from '../../config';
+
 import { ALERT_MSG, CONFIG_NAME, STORAGE } from '@constants';
 import { SidebarConfig } from '@types';
 import { fileDownload } from '@utilities/index';
@@ -17,6 +19,8 @@ export class SidebarDialogCodeEditor extends BaseEditor {
   }
 
   @property({ attribute: false }) _sidebarConfig: SidebarConfig = {};
+  @property() _configSource: ConfigSource = 'browser_storage';
+  @property() _rawYaml = '';
 
   @query('ha-yaml-editor') _yamlEditor!: any;
 
@@ -50,11 +54,12 @@ export class SidebarDialogCodeEditor extends BaseEditor {
     const initConfig = this._sidebarConfig;
     const isConfigEmpty = Object.keys(initConfig).length === 0;
     const emptyConfig = html`<ha-alert alertType="info">${ALERT_MSG.CONFIG_EMPTY}</ha-alert>`;
+    const editorValue = this._editorValue();
 
     const editor = html` ${isConfigEmpty ? emptyConfig : nothing}
       <ha-yaml-editor
         .hass=${this.hass}
-        .defaultValue=${this._sidebarConfig}
+        .defaultValue=${editorValue}
         .copyToClipboard=${true}
         .hasExtraActions=${true}
         .required=${true}
@@ -84,6 +89,15 @@ export class SidebarDialogCodeEditor extends BaseEditor {
     if (isValid) {
       console.log('YAML parsed successfully');
       this._sidebarConfig = value;
+      if (this._configSource === 'home_assistant_config') {
+        this.dispatchEvent(
+          new CustomEvent('raw-yaml-changed', {
+            bubbles: true,
+            composed: true,
+            detail: { yaml: YAML.stringify(value) },
+          })
+        );
+      }
       this._dispatchConfig(this._sidebarConfig);
     } else {
       console.error('Failed to parse YAML');
@@ -102,7 +116,10 @@ export class SidebarDialogCodeEditor extends BaseEditor {
           filename = `${CONFIG_NAME + '_' + new Date().toISOString().replace(/:/g, '-').split('.', 1).join()}`;
         }
 
-        const data = YAML.stringify(this._sidebarConfig);
+        const data =
+          this._configSource === 'home_assistant_config' && this._rawYaml.trim()
+            ? this._rawYaml
+            : YAML.stringify(this._sidebarConfig);
 
         // Create a blob from the data
         const blob = new Blob([data], { type: 'application/x-yaml' });
@@ -113,9 +130,15 @@ export class SidebarDialogCodeEditor extends BaseEditor {
         console.log('Downloading Config');
         break;
       case 'copy':
-        navigator.clipboard.writeText(YAML.stringify(this._sidebarConfig)).then(() => {
-          console.log('Copied to clipboard');
-        });
+        navigator.clipboard
+          .writeText(
+            this._configSource === 'home_assistant_config' && this._rawYaml.trim()
+              ? this._rawYaml
+              : YAML.stringify(this._sidebarConfig)
+          )
+          .then(() => {
+            console.log('Copied to clipboard');
+          });
         break;
 
       case 'delete':
@@ -135,6 +158,17 @@ export class SidebarDialogCodeEditor extends BaseEditor {
         break;
     }
   };
+
+  private _editorValue(): SidebarConfig {
+    if (this._configSource !== 'home_assistant_config' || !this._rawYaml.trim()) {
+      return this._sidebarConfig;
+    }
+    try {
+      return (YAML.parse(this._rawYaml) || {}) as SidebarConfig;
+    } catch {
+      return this._sidebarConfig;
+    }
+  }
 
   private _dispatchConfig(config: SidebarConfig) {
     const event = new CustomEvent('sidebar-changed', { detail: config, bubbles: true, composed: true });

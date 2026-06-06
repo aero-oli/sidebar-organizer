@@ -9,22 +9,57 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_ALLOW_WRITE, CONF_CONFIG_PATH, CONF_CREATE_IF_MISSING, DOMAIN
-from .helpers import DEFAULT_CONFIG_YAML, atomic_write_text, validate_yaml_config
+from .const import (
+    CONF_ALLOW_WRITE,
+    CONF_CONFIG_PATH,
+    CONF_CREATE_IF_MISSING,
+    DOMAIN,
+    FRONTEND_VERSION,
+)
+from .helpers import (
+    DEFAULT_CONFIG_YAML,
+    atomic_write_text,
+    file_metadata,
+    frontend_module_url,
+    validate_yaml_config,
+)
 
+TYPE_DIAGNOSTICS = f"{DOMAIN}/config/diagnostics"
 TYPE_INFO = f"{DOMAIN}/config/info"
 TYPE_READ = f"{DOMAIN}/config/read"
 TYPE_VALIDATE = f"{DOMAIN}/config/validate"
 TYPE_WRITE = f"{DOMAIN}/config/write"
+REGISTERED_KEY = f"{DOMAIN}_websocket_registered"
 
 
 @callback
 def async_register_websocket_commands(hass: HomeAssistant) -> None:
     """Register Sidebar Organizer WebSocket commands."""
+    if hass.data.get(REGISTERED_KEY):
+        return
+    hass.data[REGISTERED_KEY] = True
+    websocket_api.async_register_command(hass, websocket_diagnostics)
     websocket_api.async_register_command(hass, websocket_info)
     websocket_api.async_register_command(hass, websocket_read)
     websocket_api.async_register_command(hass, websocket_validate)
     websocket_api.async_register_command(hass, websocket_write)
+
+
+@websocket_api.websocket_command({vol.Required("type"): TYPE_DIAGNOSTICS})
+@callback
+def websocket_diagnostics(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Return install and runtime diagnostics."""
+    connection.send_result(
+        msg["id"],
+        {
+            **_metadata(hass),
+            "backend_loaded": True,
+            "frontend_url": frontend_module_url(FRONTEND_VERSION),
+            "legacy_resource_hint": "/hacsfiles/sidebar-organizer/sidebar-organizer.js",
+        },
+    )
 
 
 @websocket_api.websocket_command({vol.Required("type"): TYPE_INFO})
@@ -116,13 +151,11 @@ def _path(hass: HomeAssistant) -> Path:
 def _metadata(hass: HomeAssistant) -> dict[str, Any]:
     settings = hass.data[DOMAIN]
     path = _path(hass)
-    exists = path.exists()
+    metadata = file_metadata(path)
     return {
         "available": True,
         "config_path": settings[CONF_CONFIG_PATH],
         "allow_write": settings[CONF_ALLOW_WRITE],
         "create_if_missing": settings[CONF_CREATE_IF_MISSING],
-        "exists": exists,
-        "last_modified": path.stat().st_mtime if exists else None,
+        **metadata,
     }
-

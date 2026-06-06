@@ -39,7 +39,7 @@ import { styleMap } from 'lit/directives/style-map.js';
 import YAML from 'yaml';
 
 import './editor';
-import { ConfigProviderInfo, ConfigSource, HomeAssistantConfigProvider } from '../config';
+import { ConfigProviderInfo, ConfigSource, HomeAssistantConfigProvider, isHaConfigModified } from '../config';
 import { BaseEditor } from './base-editor';
 import * as ELEMENT from './editor';
 import { EditorStore } from './editor-store';
@@ -80,8 +80,12 @@ export class SidebarConfigDialog extends BaseEditor {
   @state() _invalidConfig?: INVALID_CONFIG;
   @state() private _haConfigErrors: string[] = [];
   @state() private _haConfigInfo: ConfigProviderInfo = { available: false };
+  @state() private _haDiagnostics?: ConfigProviderInfo;
+  @state() private _lastLoadedHaConfigModified?: number;
+  @state() private _rawYaml = '';
   @state() public _narrow = false;
 
+  private _haConfigPollTimer?: number;
   private _resizeObserver?: ResizeObserver;
 
   @query(DIALOG_TAG.COLORS) _dialogColors!: ELEMENT.SidebarDialogColors;
@@ -105,6 +109,7 @@ export class SidebarConfigDialog extends BaseEditor {
     this._tabState = this._configSource !== 'browser_storage' ? TAB_STATE.CODE : TAB_STATE.BASE;
     this.addEventListener('sidebar-config-changed', this._sidebarConfigChanged as EventListener);
     this._refreshHaConfigInfo();
+    this._startHaConfigPolling();
     window.sidebarDialog = this;
   }
 
@@ -115,6 +120,8 @@ export class SidebarConfigDialog extends BaseEditor {
       this._resizeObserver.disconnect();
       this._resizeObserver = undefined;
     }
+    window.clearInterval(this._haConfigPollTimer);
+    this._haConfigPollTimer = undefined;
   }
 
   public get GUImode(): boolean {
@@ -148,6 +155,7 @@ export class SidebarConfigDialog extends BaseEditor {
       if (this._configSource !== 'browser_storage') {
         this._tabState = TAB_STATE.CODE;
       }
+      this._startHaConfigPolling();
     }
 
     if (_changedProperties.has('_useConfigFile')) {
@@ -468,7 +476,10 @@ export class SidebarConfigDialog extends BaseEditor {
                 <sidebar-dialog-code-editor
                   .hass=${this.hass}
                   ._store=${this._store}
+                  ._configSource=${this._configSource}
+                  ._rawYaml=${this._rawYaml}
                   ._sidebarConfig=${this._sidebarConfig}
+                  @raw-yaml-changed=${this._handleRawYamlChanged}
                   @sidebar-changed=${this._handleSidebarChanged}
                 ></sidebar-dialog-code-editor>
               `}
@@ -552,7 +563,7 @@ export class SidebarConfigDialog extends BaseEditor {
     const source = this._configSource;
     const useJsonFile = source === 'static_yaml';
     const useHaConfig = source === 'home_assistant_config';
-    const haInfo = this._haConfigInfo;
+    const haInfo = this._haDiagnostics || this._haConfigInfo;
 
     return html`
       <div class="overlay">
@@ -562,6 +573,12 @@ export class SidebarConfigDialog extends BaseEditor {
         </ha-alert>
         ${useHaConfig && this._haConfigErrors.length > 0
           ? html`<ha-alert alert-type="warning">${this._haConfigErrors.join(' ')}</ha-alert>`
+          : nothing}
+        ${useHaConfig && this._legacyFrontendResourceLoaded()
+          ? html`<ha-alert alert-type="warning">
+              Old Dashboard resource is still loaded. Remove
+              <code>/hacsfiles/sidebar-organizer/sidebar-organizer.js</code> from Dashboard resources.
+            </ha-alert>`
           : nothing}
         ${this._renderInvalidConfig()}
 
@@ -573,42 +590,58 @@ export class SidebarConfigDialog extends BaseEditor {
             @click=${() => this._uploadConfigFile()}
             >${BTN_LABEL.UPLOAD}</ha-button
           >
-          <label class="source-picker">
-            <span>Config source</span>
-            <select .value=${source} @change=${this._handleConfigSourceChange}>
-              <option value="browser_storage">Browser storage</option>
-              <option value="static_yaml">Static YAML file from /local</option>
-              <option value="home_assistant_config">Home Assistant config folder</option>
-            </select>
-          </label>
+          <div class="source-picker" role="group" aria-label="Config source">
+            ${this._renderSourceButton('browser_storage', 'Browser storage', 'mdi:database')}
+            ${this._renderSourceButton('static_yaml', '/local YAML', 'mdi:file-code-outline')}
+            ${this._renderSourceButton('home_assistant_config', 'HA config folder', 'mdi:home-assistant')}
+          </div>
         </div>
-        ${useHaConfig
-          ? html`
-              <div class="ha-config-status">
-                <span>Backend status: ${haInfo.available ? 'available' : 'unavailable'}</span>
-                <span>Config path: ${haInfo.config_path || 'not reported'}</span>
-                <span>Last modified: ${this._formatLastModified(haInfo.last_modified)}</span>
-                <span>${haInfo.allow_write ? 'Write enabled' : 'Read-only'}</span>
-              </div>
-              <div class="ha-config-actions">
-                <ha-button appearance="plain" size="small" @click=${this._reloadHomeAssistantConfig}
-                  >Reload from HA config</ha-button
-                >
-                <ha-button
-                  appearance="plain"
-                  size="small"
-                  .disabled=${!haInfo.available || !haInfo.allow_write}
-                  @click=${this._saveHomeAssistantConfig}
-                  >Save to HA config</ha-button
-                >
-                <ha-button appearance="plain" size="small" @click=${this._validateHomeAssistantYaml}
-                  >Validate YAML</ha-button
-                >
-              </div>
-            `
-          : nothing}
+        ${useHaConfig ? this._renderHaDiagnostics(haInfo) : nothing}
       </div>
     `;
+  }
+
+  private _renderSourceButton(source: ConfigSource, label: string, icon: string): TemplateResult {
+    const selected = this._configSource === source;
+    return html`
+      <ha-button
+        appearance=${selected ? 'filled' : 'plain'}
+        size="small"
+        @click=${() => this._setConfigSource(source)}
+      >
+        <ha-icon .icon=${icon}></ha-icon>
+        ${label}
+      </ha-button>
+    `;
+  }
+
+  private _renderHaDiagnostics(info: ConfigProviderInfo): TemplateResult {
+    return html`
+      <div class="ha-config-diagnostics">
+        ${this._renderDiagnosticRow('Backend loaded', info.available || info.backend_loaded)}
+        ${this._renderDiagnosticRow('Config file exists', info.exists)}
+        ${this._renderDiagnosticRow('Write enabled', info.allow_write)}
+        <span>Path: ${info.config_path || 'not reported'}</span>
+        <span>Last modified: ${this._formatLastModified(info.last_modified)}</span>
+      </div>
+      <div class="ha-config-actions">
+        <ha-button appearance="plain" size="small" @click=${this._reloadHomeAssistantConfig}
+          >Reload from HA config</ha-button
+        >
+        <ha-button
+          appearance="plain"
+          size="small"
+          .disabled=${!info.available || !info.allow_write}
+          @click=${this._saveHomeAssistantConfig}
+          >Save to HA config</ha-button
+        >
+        <ha-button appearance="plain" size="small" @click=${this._validateHomeAssistantYaml}>Validate YAML</ha-button>
+      </div>
+    `;
+  }
+
+  private _renderDiagnosticRow(label: string, value?: boolean): TemplateResult {
+    return html`<span>${label}: ${value ? 'yes' : 'no'}</span>`;
   }
 
   private _uploadConfigFile() {
@@ -677,7 +710,15 @@ export class SidebarConfigDialog extends BaseEditor {
     event.stopPropagation();
 
     const newConfig = event.detail;
+    if (this._configSource === 'home_assistant_config' && event.target !== this._dialogCodeEditor) {
+      this._rawYaml = '';
+    }
     this._sidebarConfig = newConfig;
+  }
+
+  private _handleRawYamlChanged(event: CustomEvent<{ yaml: string }>): void {
+    event.stopPropagation();
+    this._rawYaml = event.detail.yaml;
   }
 
   private _validateStoragePanels = async (): Promise<void> => {
@@ -763,6 +804,8 @@ export class SidebarConfigDialog extends BaseEditor {
     }
 
     this._haConfigErrors = [];
+    this._rawYaml = result.rawYaml || '';
+    this._lastLoadedHaConfigModified = result.last_modified ?? undefined;
     this._sidebarConfig = result.config;
     const validationResult = (await isItemsValid(result.config, this.hass, true)) as INVALID_CONFIG;
     if (typeof validationResult === 'object' && validationResult !== null) {
@@ -770,6 +813,7 @@ export class SidebarConfigDialog extends BaseEditor {
     }
     const currentPanelOrder = JSON.parse(getStorage(STORAGE.PANEL_ORDER) || '[]');
     this._updateSidebarItems(currentPanelOrder, getHiddenPanels());
+    this._startHaConfigPolling();
   };
 
   private _sidebarConfigChanged(event: CustomEvent<ConfigChangedEvent>) {
@@ -878,11 +922,15 @@ export class SidebarConfigDialog extends BaseEditor {
     this._configLoaded = true;
   };
 
-  private _handleConfigSourceChange = async (ev: Event): Promise<void> => {
-    const source = (ev.target as HTMLSelectElement).value as ConfigSource;
+  private _setConfigSource = async (source: ConfigSource): Promise<void> => {
     this._configSource = source;
     this._useConfigFile = source === 'static_yaml';
     setConfigSource(source);
+    if (source !== 'home_assistant_config') {
+      this._haDiagnostics = undefined;
+      this._lastLoadedHaConfigModified = undefined;
+      this._rawYaml = '';
+    }
     await this._setupInitConfig();
     this.requestUpdate();
   };
@@ -899,7 +947,20 @@ export class SidebarConfigDialog extends BaseEditor {
     }
 
     const provider = new HomeAssistantConfigProvider(this.hass);
-    const yaml = YAML.stringify(this._sidebarConfig);
+    const latestInfo = await provider.info();
+    if (
+      isHaConfigModified(this._lastLoadedHaConfigModified, latestInfo.last_modified) &&
+      !(await showConfirmDialog(
+        this,
+        'The Home Assistant config file changed after you loaded it. Overwrite it?',
+        'Overwrite',
+        'Cancel'
+      ))
+    ) {
+      return;
+    }
+
+    const yaml = this._rawYaml.trim() ? this._rawYaml : YAML.stringify(this._sidebarConfig);
     const validation = await provider.validate(yaml);
     if (!validation.valid) {
       this._haConfigErrors = validation.errors;
@@ -909,6 +970,9 @@ export class SidebarConfigDialog extends BaseEditor {
 
     try {
       this._haConfigInfo = await provider.write(yaml);
+      this._haDiagnostics = { ...this._haDiagnostics, ...this._haConfigInfo };
+      this._lastLoadedHaConfigModified = this._haConfigInfo.last_modified ?? undefined;
+      this._rawYaml = yaml;
       this._haConfigErrors = [];
       setStorage(STORAGE.HA_CONFIG_CACHE, this._sidebarConfig);
       if (this._haConfigInfo.last_modified != null) {
@@ -931,6 +995,8 @@ export class SidebarConfigDialog extends BaseEditor {
       return;
     }
     this._sidebarConfig = result.config;
+    this._rawYaml = result.rawYaml || '';
+    this._lastLoadedHaConfigModified = result.last_modified ?? undefined;
     this._haConfigErrors = [];
     setStorage(STORAGE.HA_CONFIG_CACHE, result.config);
     if (result.last_modified != null) {
@@ -942,7 +1008,7 @@ export class SidebarConfigDialog extends BaseEditor {
 
   private _validateHomeAssistantYaml = async (): Promise<void> => {
     const provider = new HomeAssistantConfigProvider(this.hass);
-    const result = await provider.validate(YAML.stringify(this._sidebarConfig));
+    const result = await provider.validate(this._rawYaml.trim() ? this._rawYaml : YAML.stringify(this._sidebarConfig));
     this._haConfigErrors = result.errors;
     await showAlertDialog(this, result.valid ? ALERT_MSG.CONFIG_VALID : `${ALERT_MSG.CONFIG_INVALID}\n${result.errors.join('\n')}`);
   };
@@ -950,7 +1016,47 @@ export class SidebarConfigDialog extends BaseEditor {
   private _refreshHaConfigInfo = async (): Promise<void> => {
     const provider = new HomeAssistantConfigProvider(this.hass);
     this._haConfigInfo = await provider.info();
+    if (this._configSource === 'home_assistant_config') {
+      this._haDiagnostics = await provider.diagnostics();
+    }
   };
+
+  private _startHaConfigPolling(): void {
+    window.clearInterval(this._haConfigPollTimer);
+    this._haConfigPollTimer = undefined;
+    if (this._configSource !== 'home_assistant_config' || !this._connected) return;
+    this._haConfigPollTimer = window.setInterval(() => this._checkHaConfigExternalChange(), 30000);
+  }
+
+  private async _checkHaConfigExternalChange(): Promise<void> {
+    if (this._configSource !== 'home_assistant_config') return;
+    const provider = new HomeAssistantConfigProvider(this.hass);
+    const info = await provider.info();
+    const current = this._lastLoadedHaConfigModified ?? this._haConfigInfo.last_modified;
+    const next = info.last_modified;
+    if (!isHaConfigModified(current, next)) {
+      this._haConfigInfo = info;
+      return;
+    }
+
+    this._haConfigInfo = info;
+    this._haDiagnostics = { ...this._haDiagnostics, ...info };
+    const reload = await showConfirmDialog(
+      this,
+      'The Home Assistant config file changed on disk. Reload it now?',
+      'Reload',
+      'Later'
+    );
+    if (reload) {
+      await this._reloadHomeAssistantConfig();
+    }
+  }
+
+  private _legacyFrontendResourceLoaded(): boolean {
+    return Array.from(document.scripts).some((script) =>
+      script.src.includes('/hacsfiles/sidebar-organizer/sidebar-organizer.js')
+    );
+  }
 
   private _formatLastModified(lastModified?: number | null): string {
     if (!lastModified) return 'unknown';
@@ -1154,6 +1260,18 @@ export class SidebarConfigDialog extends BaseEditor {
           --mdc-icon-button-size: 42px;
           gap: var(--side-dialog-gutter);
         }
+        .source-picker {
+          display: flex;
+          flex-wrap: wrap;
+          gap: var(--side-dialog-gutter);
+          justify-content: flex-end;
+        }
+        .source-picker ha-button {
+          --mdc-icon-size: 18px;
+        }
+        .source-picker ha-icon {
+          margin-inline-end: 0.35rem;
+        }
         .header-row.center {
           justify-content: center;
         }
@@ -1202,6 +1320,18 @@ export class SidebarConfigDialog extends BaseEditor {
           width: 100%;
           justify-content: space-around;
           background: var(--disabled-color);
+        }
+        .ha-config-diagnostics,
+        .ha-config-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: var(--side-dialog-gutter);
+          align-items: center;
+          margin-block-start: var(--side-dialog-gutter);
+        }
+        .ha-config-diagnostics {
+          color: var(--secondary-text-color);
+          font-size: 0.9rem;
         }
       `,
     ];

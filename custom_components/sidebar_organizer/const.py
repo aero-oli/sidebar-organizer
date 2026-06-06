@@ -11,5 +11,5 @@ DEFAULT_CONFIG_PATH = "sidebar-organizer.yaml"
 DEFAULT_CREATE_IF_MISSING = True
 
 FRONTEND_JS = "sidebar-organizer.js"
-FRONTEND_VERSION = "4.0.5"
+FRONTEND_VERSION = "4.1.0"
 FRONTEND_URL_BASE = f"/{DOMAIN}/frontend"

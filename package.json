@@ -1,6 +1,6 @@
 {
   "name": "sidebar-organizer",
-  "version": "4.0.5",
+  "version": "4.1.0",
   "module": "dist/sidebar-organizer.js",
   "author": "Viet Ngoc",
   "license": "MIT",
@@ -12,8 +12,8 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/ngocjohn/sidebar-organizer",
-    "repo": "ngocjohn/sidebar-organizer"
+    "url": "https://github.com/aero-oli/sidebar-organizer",
+    "repo": "aero-oli/sidebar-organizer"
   },
   "dependencies": {
     "@jaames/iro": "^5.5.2",
@@ -58,10 +58,15 @@
   "scripts": {
     "start": "rollup -c rollup.config.js --bundleConfigAsCjs --watch",
     "build": "pnpm run lint && pnpm run rollup && pnpm run copy:integration-frontend",
+    "check:backend": "python3 -m compileall custom_components/sidebar_organizer",
+    "check:bundle": "node scripts/check_integration_bundle.mjs",
     "copy:integration-frontend": "mkdir -p custom_components/sidebar_organizer/frontend && cp build/sidebar-organizer.js custom_components/sidebar_organizer/frontend/sidebar-organizer.js",
     "rollup": "rollup -c rollup.config.js --bundleConfigAsCjs",
     "lint": "eslint src/ --ext .ts --fix",
-    "test": "node --import tsx --test tests/frontend/*.test.ts && python3 -m unittest discover -s tests/backend",
+    "test": "pnpm run test:frontend && pnpm run test:backend",
+    "test:backend": "python3 -m unittest discover -s tests/backend",
+    "test:frontend": "node --import tsx --test tests/frontend/*.test.ts",
+    "verify": "pnpm test && pnpm run build && pnpm run check:backend && pnpm run check:bundle",
     "postversion": "pnpm run build"
   }
 }

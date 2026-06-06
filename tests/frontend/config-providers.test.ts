@@ -33,6 +33,16 @@ default_collapsed:
     assert.equal(result.config, undefined);
     assert.ok(result.errors[0].includes('YAML'));
   });
+
+  it('validates additional known list fields', () => {
+    const result = parseSidebarYamlConfig('bottom_grid_items: config\nhidden_items: {}\n');
+
+    assert.equal(result.valid, false);
+    assert.deepEqual(result.errors, [
+      'bottom_grid_items must be a list of strings.',
+      'hidden_items must be a list of strings.',
+    ]);
+  });
 });
 
 describe('HomeAssistantConfigProvider', () => {
@@ -101,14 +111,54 @@ describe('HomeAssistantConfigProvider', () => {
     assert.equal(result.config, undefined);
     assert.ok(result.errors[0].includes('YAML'));
   });
+
+  it('requests backend diagnostics', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const provider = new HomeAssistantConfigProvider({
+      callWS: async (message: Record<string, unknown>) => {
+        calls.push(message);
+        return {
+          available: true,
+          backend_loaded: true,
+          frontend_url: '/sidebar_organizer/frontend/sidebar-organizer.js?v=4.1.0',
+        };
+      },
+    } as never);
+
+    const diagnostics = await provider.diagnostics();
+
+    assert.equal(diagnostics.backend_loaded, true);
+    assert.equal(calls[0].type, 'sidebar_organizer/config/diagnostics');
+  });
+
+  it('returns raw backend YAML for round-trip editing', async () => {
+    const provider = new HomeAssistantConfigProvider({
+      callWS: async () => ({ yaml: 'header_title: Test\n# comment\nbottom_items: []', last_modified: 1 }),
+    } as never);
+
+    const result = await provider.read();
+
+    assert.equal(result.rawYaml?.includes('# comment'), true);
+  });
+
+  it('reads last modified metadata from backend info', async () => {
+    const provider = new HomeAssistantConfigProvider({
+      callWS: async () => ({ available: true, last_modified: 123 }),
+    } as never);
+
+    assert.equal(await provider.lastModified(), 123);
+  });
 });
 
 describe('isHaConfigModified', () => {
   it('detects newer backend config metadata', () => {
     assert.equal(isHaConfigModified(100, 101), true);
     assert.equal(isHaConfigModified(100, 100), false);
+    assert.equal(isHaConfigModified(100, 99), false);
     assert.equal(isHaConfigModified(undefined, 100), false);
     assert.equal(isHaConfigModified(100, undefined), false);
+    assert.equal(isHaConfigModified(null, 100), false);
+    assert.equal(isHaConfigModified(100, null), false);
   });
 });
 

@@ -6,11 +6,15 @@ export type ConfigSource = (typeof CONFIG_SOURCES)[number];
 export interface ConfigProviderInfo {
   allow_write?: boolean;
   available: boolean;
+  backend_loaded?: boolean;
   config_path?: string;
   create_if_missing?: boolean;
   error?: string;
   exists?: boolean;
+  frontend_url?: string;
   last_modified?: number | null;
+  legacy_resource_hint?: string;
+  size?: number | null;
 }
 
 export interface ParsedSidebarYaml {
@@ -22,7 +26,9 @@ export interface ParsedSidebarYaml {
 }
 
 export interface SidebarConfigProvider {
+  diagnostics?(): Promise<ConfigProviderInfo>;
   info(): Promise<ConfigProviderInfo>;
+  lastModified?(): Promise<number | undefined>;
   read(): Promise<ParsedSidebarYaml>;
   validate(yaml: string): Promise<{ errors: string[]; valid: boolean }>;
   write(yaml: string): Promise<ConfigProviderInfo>;

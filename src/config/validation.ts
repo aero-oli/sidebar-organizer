@@ -30,12 +30,10 @@ export const validateSidebarConfigShape = (config: unknown): string[] => {
 
   const errors: string[] = [];
 
-  if ('bottom_items' in config && !isStringArray(config.bottom_items)) {
-    errors.push('bottom_items must be a list of strings.');
-  }
-
-  if ('default_collapsed' in config && !isStringArray(config.default_collapsed)) {
-    errors.push('default_collapsed must be a list of strings.');
+  for (const key of ['bottom_items', 'bottom_grid_items', 'default_collapsed', 'hidden_items'] as const) {
+    if (key in config && !isStringArray(config[key])) {
+      errors.push(`${key} must be a list of strings.`);
+    }
   }
 
   if ('custom_groups' in config) {
@@ -62,4 +60,3 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
-

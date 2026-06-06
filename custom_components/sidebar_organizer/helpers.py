@@ -8,8 +8,23 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .const import FRONTEND_JS, FRONTEND_URL_BASE
+    from .const import (
+        CONF_ALLOW_WRITE,
+        CONF_CONFIG_PATH,
+        CONF_CREATE_IF_MISSING,
+        DEFAULT_ALLOW_WRITE,
+        DEFAULT_CONFIG_PATH,
+        DEFAULT_CREATE_IF_MISSING,
+        FRONTEND_JS,
+        FRONTEND_URL_BASE,
+    )
 except ImportError:  # pragma: no cover - used by lightweight direct module tests.
+    CONF_ALLOW_WRITE = "allow_write"
+    CONF_CONFIG_PATH = "config_path"
+    CONF_CREATE_IF_MISSING = "create_if_missing"
+    DEFAULT_ALLOW_WRITE = True
+    DEFAULT_CONFIG_PATH = "sidebar-organizer.yaml"
+    DEFAULT_CREATE_IF_MISSING = True
     FRONTEND_JS = "sidebar-organizer.js"
     FRONTEND_URL_BASE = "/sidebar_organizer/frontend"
 
@@ -41,6 +56,16 @@ color_config:
 """
 
 
+def normalize_options(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Return Sidebar Organizer options with defaults applied."""
+    raw = raw or {}
+    return {
+        CONF_CONFIG_PATH: raw.get(CONF_CONFIG_PATH, DEFAULT_CONFIG_PATH),
+        CONF_ALLOW_WRITE: raw.get(CONF_ALLOW_WRITE, DEFAULT_ALLOW_WRITE),
+        CONF_CREATE_IF_MISSING: raw.get(CONF_CREATE_IF_MISSING, DEFAULT_CREATE_IF_MISSING),
+    }
+
+
 def resolve_config_path(config_dir: str | Path, config_path: str) -> Path:
     """Resolve a Sidebar Organizer config path and require it to stay under config_dir."""
     if not config_path or not isinstance(config_path, str):
@@ -63,11 +88,9 @@ def validate_config_object(config: Any) -> list[str]:
     if not isinstance(config, dict):
         return ["YAML must parse to an object/dictionary."]
 
-    if "bottom_items" in config and not _is_list_of_strings(config["bottom_items"]):
-        errors.append("bottom_items must be a list of strings.")
-
-    if "default_collapsed" in config and not _is_list_of_strings(config["default_collapsed"]):
-        errors.append("default_collapsed must be a list of strings.")
+    for key in ("bottom_items", "bottom_grid_items", "default_collapsed", "hidden_items"):
+        if key in config and not _is_list_of_strings(config[key]):
+            errors.append(f"{key} must be a list of strings.")
 
     if "custom_groups" in config:
         custom_groups = config["custom_groups"]
@@ -112,6 +135,14 @@ def atomic_write_text(target: Path, content: str) -> None:
     finally:
         if temp_path.exists():
             temp_path.unlink()
+
+
+def file_metadata(path: Path) -> dict[str, Any]:
+    """Return basic metadata for a config file."""
+    if not path.exists():
+        return {"exists": False, "last_modified": None, "size": None}
+    stat = path.stat()
+    return {"exists": True, "last_modified": stat.st_mtime, "size": stat.st_size}
 
 
 def frontend_module_url(version: str) -> str:
