@@ -1,9 +1,10 @@
 import { CONFIG_SECTIONS_MENU, CONFIG_SECTION, VERSION } from '@constants';
 import { mdiClose, mdiHome, mdiMenu } from '@mdi/js';
 import { fireEvent } from '@utilities/fire_event';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { omit } from 'es-toolkit/compat';
 import { CSSResultGroup, TemplateResult, css, html, nothing } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { property, state } from 'lit/decorators.js';
 
 import { BaseEditor } from '../base-editor';
 
@@ -12,7 +13,7 @@ declare global {
     'menu-value-changed': { value?: string };
   }
 }
-@customElement('sidebar-dialog-menu')
+@safeCustomElement('sidebar-dialog-menu')
 export class SidebarDialogMenu extends BaseEditor {
   @property() public value?: string;
   @state() private _open = false;

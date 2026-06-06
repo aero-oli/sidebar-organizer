@@ -20,16 +20,17 @@ import {
 import { SidebarConfig, PANEL_TYPE } from '@types';
 import { createAlert, nextRender } from '@utilities/dom-utils';
 import { getDefaultPanelUrlPath, getPanelTitleFromUrlPath } from '@utilities/panel';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { showAlertDialog, showConfirmDialog, showPromptDialog } from '@utilities/show-dialog-box';
 import { BaseEditor } from 'components/base-editor';
 import { isEmpty } from 'es-toolkit/compat';
 import { html, TemplateResult, nothing, PropertyValues, CSSResultGroup, css } from 'lit';
-import { customElement, property, query, state } from 'lit/decorators.js';
+import { property, query, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 
 import { SoPanelAll } from './shared/so-panel-all';
 
-@customElement('sidebar-dialog-panels')
+@safeCustomElement('sidebar-dialog-panels')
 export class SidebarDialogPanels extends BaseEditor {
   constructor() {
     super(CONFIG_SECTION.PANELS);

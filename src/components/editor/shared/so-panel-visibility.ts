@@ -2,9 +2,10 @@ import { CONFIG_AREA_LABELS, PANEL_AREA, VISIBILITY_SECTION, VisibilitySectionKe
 import { SidebarConfig } from '@types';
 import { createExpansionPanel, ExpandablePanelProps } from '@utilities/dom-utils';
 import { fireEvent } from '@utilities/fire_event';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { pick } from 'es-toolkit/compat';
 import { html, TemplateResult, css, PropertyValues } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { property, state } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
 
 import { BaseEditor } from '../../base-editor';
@@ -40,7 +41,7 @@ const TYPE_HELPER_TEXT: Record<VisibleType, string> = {
   items:
     'If a panel is included in a group with a visibility setting, the individual panel setting will be ignored in favor of the group setting.',
 };
-@customElement('so-panel-visibility')
+@safeCustomElement('so-panel-visibility')
 export class SoPanelVisibility extends BaseEditor {
   constructor() {
     super(PANEL_AREA.VISIBILITY);

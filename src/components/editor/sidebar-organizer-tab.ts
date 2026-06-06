@@ -1,10 +1,11 @@
 import type { TemplateResult } from 'lit';
 
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { css, html, LitElement } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { property } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
 
-@customElement('sidebar-organizer-tab')
+@safeCustomElement('sidebar-organizer-tab')
 export class SidebarOrganizerTab extends LitElement {
   @property({ type: Boolean, reflect: true }) public active = false;
 

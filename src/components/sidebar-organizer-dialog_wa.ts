@@ -1,18 +1,19 @@
 import { ALERT_MSG, HA_EVENT, NAMESPACE_TITLE, REPO_URL, SLOT } from '@constants';
 import { mdiClose, mdiFullscreen, mdiFullscreenExit, mdiInformation } from '@mdi/js';
+import { clearSidebarOrganizerStorage } from '@utilities/configs/misc';
 
 import './sidebar-dialog';
 
-import { clearSidebarOrganizerStorage } from '@utilities/configs/misc';
 import { nextRender } from '@utilities/dom-utils';
 import { TRANSLATED_LABEL } from '@utilities/localize';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { showConfirmDialog } from '@utilities/show-dialog-box';
 import { SidebarConfigDialogParams } from '@utilities/show-dialog-sidebar-organizer';
 import { getStorageConfig } from '@utilities/storage-utils';
 import { showToast } from '@utilities/toast-notify';
 import { cloneDeep, isEmpty } from 'es-toolkit/compat';
 import { CSSResultGroup, LitElement, TemplateResult, css, html, nothing } from 'lit';
-import { customElement, property, query, state } from 'lit/decorators.js';
+import { property, query, state } from 'lit/decorators.js';
 
 import { ConfigSource } from '../config';
 import { HA, SidebarConfig } from '../types';
@@ -20,7 +21,7 @@ import { HassDialog } from '../types/dialog-manager';
 import { fireEvent } from '../utilities/fire_event';
 import { SidebarConfigDialog } from './sidebar-dialog';
 
-@customElement('sidebar-organizer-dialog-wa')
+@safeCustomElement('sidebar-organizer-dialog-wa')
 export class SidebarOrganizerDialogWA extends LitElement implements HassDialog<SidebarConfigDialogParams> {
   @property({ attribute: false }) public hass!: HA;
   @property({ type: Boolean, reflect: true }) public large = false;

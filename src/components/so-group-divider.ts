@@ -1,4 +1,5 @@
 import { ATTRIBUTE } from '@constants';
+import { defineCustomElementSafely } from '@utilities/safe-custom-element';
 import { html, LitElement, PropertyValues } from 'lit';
 import { property, state } from 'lit/decorators.js';
 
@@ -43,9 +44,7 @@ export class SoGroupDivider extends LitElement {
   }
 }
 
-if (!customElements.get('so-group-divider')) {
-  customElements.define('so-group-divider', SoGroupDivider);
-}
+defineCustomElementSafely('so-group-divider', SoGroupDivider);
 
 declare global {
   interface HTMLElementTagNameMap {

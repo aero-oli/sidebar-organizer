@@ -3,13 +3,14 @@ import { _getDarkConfigMode, applyTheme } from '@utilities/apply-theme';
 import { getDefaultThemeColors, convertPreviewCustomStyles } from '@utilities/custom-styles';
 import { isIcon } from '@utilities/is-icon';
 import { getDefaultPanelUrlPath } from '@utilities/panel';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { shallowEqual } from '@utilities/shallow-equal';
 import { hasTemplate, subscribeRenderTemplate } from '@utilities/ws-templates';
 import { BaseEditor } from 'components/base-editor';
 import { BOTTOM_SECTION, CONFIG_SECTION } from 'constants/config-area';
 import { isEmpty } from 'es-toolkit/compat';
 import { html, css, TemplateResult, PropertyValues, CSSResultGroup, nothing } from 'lit';
-import { customElement, property, query, queryAll, state } from 'lit/decorators.js';
+import { property, query, queryAll, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
 
 export interface PreviewPanels {
@@ -18,7 +19,7 @@ export interface PreviewPanels {
   bottom_grid_items?: PanelInfo[];
 }
 
-@customElement('sidebar-dialog-preview')
+@safeCustomElement('sidebar-dialog-preview')
 export class SidebarDialogPreview extends BaseEditor {
   constructor() {
     super(CONFIG_SECTION.PREVIEW);

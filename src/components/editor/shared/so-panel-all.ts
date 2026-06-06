@@ -20,9 +20,10 @@ import {
 import { _renderActionItem, ActionType, computeActionList } from '@utilities/action-menu';
 import { createExpansionPanel, ExpandablePanelProps, isMobile, stopPropagation } from '@utilities/dom-utils.js';
 import { fireEvent } from '@utilities/fire_event';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, TemplateResult, css, nothing, PropertyValues } from 'lit';
-import { customElement, property, queryAll } from 'lit/decorators.js';
+import { property, queryAll } from 'lit/decorators.js';
 
 import './so-data-item-table';
 import { BaseEditor } from '../../base-editor.js';
@@ -53,7 +54,7 @@ type TableExpansionParams = {
   expansionOptions?: ExpandablePanelProps['options'];
 };
 
-@customElement('so-panel-all')
+@safeCustomElement('so-panel-all')
 export class SoPanelAll extends BaseEditor {
   constructor() {
     super(PANEL_AREA.ALL_ITEMS);

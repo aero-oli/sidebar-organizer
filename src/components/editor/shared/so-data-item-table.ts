@@ -1,6 +1,7 @@
 import { NewItemConfig, NewItemConfigKeys } from '@types';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { LitElement, html, nothing } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { property } from 'lit/decorators.js';
 
 const columnLabels: Record<NewItemConfigKeys | string, string> = {
   title: 'Title',
@@ -11,7 +12,7 @@ const columnLabels: Record<NewItemConfigKeys | string, string> = {
   notification: 'Notification',
 };
 
-@customElement('so-data-item-table')
+@safeCustomElement('so-data-item-table')
 export class SoDataItemTable extends LitElement {
   @property({ type: Array }) public items: NewItemConfig[] = [];
   @property({ attribute: false }) public columns: NewItemConfigKeys[] = [];

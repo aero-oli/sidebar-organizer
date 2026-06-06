@@ -1,12 +1,13 @@
 import { mdiChevronLeft, mdiGestureTap, mdiMessageBadgeOutline } from '@mdi/js';
 import { SidebarConfig, NewItemConfig } from '@types';
 import { TRANSLATED_LABEL } from '@utilities/localize';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { showConfirmDialog, showPromptDialog } from '@utilities/show-dialog-box';
 import { BaseEditor } from 'components/base-editor';
 import { BOTTOM_SECTION, CONFIG_SECTION } from 'constants/config-area';
 import { capitalize, findKey, pick } from 'es-toolkit/compat';
 import { html, TemplateResult, nothing, PropertyValues, CSSResultGroup, css } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { property, state } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
 import { repeat } from 'lit/directives/repeat.js';
 import memoizeOne from 'memoize-one';
@@ -17,7 +18,7 @@ const convertTitle = (title: string | undefined): string => {
   return title ? capitalize(title.trim()) : 'Ungrouped';
 };
 
-@customElement('sidebar-dialog-new-items')
+@safeCustomElement('sidebar-dialog-new-items')
 export class SidebarDialogNewItems extends BaseEditor {
   constructor() {
     super(CONFIG_SECTION.NEW_ITEMS);

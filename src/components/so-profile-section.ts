@@ -5,9 +5,10 @@ import { clearSidebarOrganizerStorage } from '@utilities/configs/misc';
 import { clearBrowserCache, fileDownload, nextRender } from '@utilities/dom-utils';
 import { CoreFrontendUserData, subscribeFrontendUserData } from '@utilities/index';
 import { getDefaultPanelUrlPath } from '@utilities/panel';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { UnsubscribeFunc } from 'home-assistant-js-websocket/dist/types';
 import { css, html, LitElement, PropertyValues } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { property } from 'lit/decorators.js';
 import YAML from 'yaml';
 
 type ActionType = 'open_dialog' | 'clear_cache' | 'download_config' | 'delete_config';
@@ -50,7 +51,7 @@ const ACTION_LIST: {
   },
 ] as const;
 
-@customElement('so-profile-section')
+@safeCustomElement('so-profile-section')
 export class SoProfileSection extends LitElement {
   @property({ attribute: false }) public organizer!: SidebarOrganizer;
 

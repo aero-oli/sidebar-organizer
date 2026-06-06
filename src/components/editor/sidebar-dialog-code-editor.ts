@@ -2,14 +2,15 @@ import { ALERT_MSG, CONFIG_NAME, STORAGE } from '@constants';
 import { SidebarConfig } from '@types';
 import { fileDownload } from '@utilities/index';
 import { TRANSLATED_LABEL } from '@utilities/localize';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { showConfirmDialog, showPromptDialog } from '@utilities/show-dialog-box';
 import { removeStorage } from '@utilities/storage-utils';
 import { BaseEditor } from 'components/base-editor';
 import { html, css, TemplateResult, CSSResultGroup, nothing, PropertyValues } from 'lit';
-import { customElement, property, query } from 'lit/decorators.js';
+import { property, query } from 'lit/decorators.js';
 import YAML from 'yaml';
 
-@customElement('sidebar-dialog-code-editor')
+@safeCustomElement('sidebar-dialog-code-editor')
 export class SidebarDialogCodeEditor extends BaseEditor {
   constructor() {
     super();

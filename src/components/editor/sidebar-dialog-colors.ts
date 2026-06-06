@@ -14,9 +14,10 @@ import { getDefaultThemeColors } from '@utilities/custom-styles';
 import { createExpansionPanel } from '@utilities/dom-utils';
 import { fireEvent } from '@utilities/fire_event';
 import { getObjectDifferences } from '@utilities/index';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, css, TemplateResult, PropertyValues, CSSResultGroup, nothing } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { property, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
 import tinycolor from 'tinycolor2';
 
@@ -29,7 +30,7 @@ enum THEME_STATE {
   ERROR = 3,
 }
 
-@customElement('sidebar-dialog-colors')
+@safeCustomElement('sidebar-dialog-colors')
 export class SidebarDialogColors extends BaseEditor {
   constructor() {
     super(CONFIG_SECTION.APPEARANCE);

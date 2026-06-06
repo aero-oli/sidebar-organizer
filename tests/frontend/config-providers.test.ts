@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { isHaConfigModified } from '../../src/config/ha-config-refresh';
 import { HomeAssistantConfigProvider } from '../../src/config/providers/ha-config-provider';
 import { parseSidebarYamlConfig } from '../../src/config/validation';
+import { defineCustomElementSafely } from '../../src/utilities/safe-custom-element';
 import { claimSidebarOrganizerModuleLoad } from '../../src/utilities/module-load-guard';
 
 describe('parseSidebarYamlConfig', () => {
@@ -127,5 +128,35 @@ describe('claimSidebarOrganizerModuleLoad', () => {
     } as unknown as Window;
 
     assert.equal(claimSidebarOrganizerModuleLoad(fakeWindow), false);
+  });
+});
+
+describe('defineCustomElementSafely', () => {
+  it('does not throw when the registry reports an already-used element name', () => {
+    const registry = {
+      get: () => undefined,
+      define: () => {
+        throw new Error(
+          'Failed to execute define on CustomElementRegistry: the name "so-group-divider" has already been used with this registry'
+        );
+      },
+    } as unknown as CustomElementRegistry;
+
+    assert.doesNotThrow(() => {
+      defineCustomElementSafely('so-group-divider', class SoGroupDivider {}, registry);
+    });
+  });
+
+  it('throws unrelated registry errors', () => {
+    const registry = {
+      get: () => undefined,
+      define: () => {
+        throw new Error('registry unavailable');
+      },
+    } as unknown as CustomElementRegistry;
+
+    assert.throws(() => {
+      defineCustomElementSafely('so-group-divider', class SoGroupDivider {}, registry);
+    }, /registry unavailable/);
   });
 });

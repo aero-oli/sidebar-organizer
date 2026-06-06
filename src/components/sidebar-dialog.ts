@@ -15,6 +15,7 @@ import { cleanItemsFromConfig } from '@utilities/configs/clean-items';
 import { comparePanelItems } from '@utilities/dashboard';
 import { TRANSLATED_LABEL } from '@utilities/localize';
 import { getDefaultPanelUrlPath } from '@utilities/panel';
+import { safeCustomElement } from '@utilities/safe-custom-element';
 import {
   DialogBoxParams,
   DialogType,
@@ -33,7 +34,7 @@ import {
 } from '@utilities/storage-utils';
 import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, css, TemplateResult, PropertyValues, CSSResultGroup, nothing } from 'lit';
-import { customElement, property, query, state } from 'lit/decorators.js';
+import { property, query, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
 import YAML from 'yaml';
 
@@ -49,7 +50,7 @@ export interface ConfigChangedEvent {
   config: SidebarConfig;
 }
 
-@customElement('sidebar-organizer-config-dialog')
+@safeCustomElement('sidebar-organizer-config-dialog')
 export class SidebarConfigDialog extends BaseEditor {
   @property({ type: Boolean, reflect: true, attribute: 'fullscreen' }) fullscreen: boolean = false;
   @property({ attribute: false }) _mainDialog!: SidebarOrganizerDialog | SidebarOrganizerDialogWA;
