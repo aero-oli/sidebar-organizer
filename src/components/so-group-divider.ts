@@ -1,7 +1,7 @@
 import { ATTRIBUTE } from '@constants';
 import { html, LitElement, PropertyValues } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
-@customElement('so-group-divider')
+import { property, state } from 'lit/decorators.js';
+
 export class SoGroupDivider extends LitElement {
   @property({ attribute: false }) public haSidebar: any;
   @property({ attribute: 'group' }) public group: string = '';
@@ -41,6 +41,10 @@ export class SoGroupDivider extends LitElement {
         : html`<ha-icon icon="mdi:chevron-down"></ha-icon><span>${this.group.trim()}</span>`}
     `;
   }
+}
+
+if (!customElements.get('so-group-divider')) {
+  customElements.define('so-group-divider', SoGroupDivider);
 }
 
 declare global {

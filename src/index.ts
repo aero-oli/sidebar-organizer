@@ -1,26 +1,32 @@
-import './sidebar-organizer';
 import { infoFrontendModule } from '@utilities/logger';
+import { claimSidebarOrganizerModuleLoad } from '@utilities/module-load-guard';
 
 const NAME_RGX = /sidebar-organizer.js/i;
 
-const loadedScripts = Array.from(document.scripts);
+if (claimSidebarOrganizerModuleLoad()) {
+  import('./sidebar-organizer');
 
-const resources: string[] = [];
+  const loadedScripts = Array.from(document.scripts);
 
-for (const script of loadedScripts) {
-  if (script?.innerText?.trim()?.startsWith('import(')) {
-    const imports = script.innerText.split(';')?.map((e) => e.trim());
-    for (const imp of imports) {
-      resources.push(imp.replace(/^import\(\"/, '').replace(/\"\)/, ''));
+  const resources: string[] = [];
+
+  for (const script of loadedScripts) {
+    if (script?.innerText?.trim()?.startsWith('import(')) {
+      const imports = script.innerText.split(';')?.map((e) => e.trim());
+      for (const imp of imports) {
+        resources.push(imp.replace(/^import\(\"/, '').replace(/\"\)/, ''));
+      }
     }
   }
-}
 
-if (resources.some((r) => NAME_RGX.test(r))) {
-  // compareHacsTag(configUrl!);
-  // console.log('%cSidebar Organizer is loaded as a module.', 'color: green; font-weight: bold;');
+  if (resources.some((r) => NAME_RGX.test(r))) {
+    // compareHacsTag(configUrl!);
+    // console.log('%cSidebar Organizer is loaded as a module.', 'color: green; font-weight: bold;');
+  } else {
+    const dashResource = loadedScripts.find((s) => NAME_RGX.test(s.src))?.src;
+    const hacsUrl = dashResource?.match(/\/hacsfiles.*$/)?.[0];
+    infoFrontendModule(hacsUrl);
+  }
 } else {
-  const dashResource = loadedScripts.find((s) => NAME_RGX.test(s.src))?.src;
-  const hacsUrl = dashResource?.match(/\/hacsfiles.*$/)?.[0];
-  infoFrontendModule(hacsUrl);
+  console.warn('Sidebar Organizer is already loaded. Skipping duplicate module startup.');
 }

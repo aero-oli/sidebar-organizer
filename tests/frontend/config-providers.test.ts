@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { isHaConfigModified } from '../../src/config/ha-config-refresh';
 import { HomeAssistantConfigProvider } from '../../src/config/providers/ha-config-provider';
 import { parseSidebarYamlConfig } from '../../src/config/validation';
+import { claimSidebarOrganizerModuleLoad } from '../../src/utilities/module-load-guard';
 
 describe('parseSidebarYamlConfig', () => {
   it('parses and normalizes valid sidebar YAML', () => {
@@ -107,5 +108,24 @@ describe('isHaConfigModified', () => {
     assert.equal(isHaConfigModified(100, 100), false);
     assert.equal(isHaConfigModified(undefined, 100), false);
     assert.equal(isHaConfigModified(100, undefined), false);
+  });
+});
+
+describe('claimSidebarOrganizerModuleLoad', () => {
+  it('allows the first module load and blocks later loads', () => {
+    const fakeWindow = {} as Window;
+
+    assert.equal(claimSidebarOrganizerModuleLoad(fakeWindow), true);
+    assert.equal(claimSidebarOrganizerModuleLoad(fakeWindow), false);
+  });
+
+  it('blocks loading when the group divider is already registered by another copy', () => {
+    const fakeWindow = {
+      customElements: {
+        get: (name: string) => (name === 'so-group-divider' ? class ExistingGroupDivider {} : undefined),
+      },
+    } as unknown as Window;
+
+    assert.equal(claimSidebarOrganizerModuleLoad(fakeWindow), false);
   });
 });
