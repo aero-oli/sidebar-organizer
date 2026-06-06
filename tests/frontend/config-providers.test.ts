@@ -120,7 +120,7 @@ describe('HomeAssistantConfigProvider', () => {
         return {
           available: true,
           backend_loaded: true,
-          frontend_url: '/sidebar_organizer/frontend/sidebar-organizer.js?v=4.1.0',
+          frontend_url: '/sidebar_organizer/frontend/sidebar-organizer.js?v=4.1.1',
         };
       },
     } as never);

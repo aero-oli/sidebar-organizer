@@ -19,8 +19,8 @@ export class SidebarDialogCodeEditor extends BaseEditor {
   }
 
   @property({ attribute: false }) _sidebarConfig: SidebarConfig = {};
-  @property() _configSource: ConfigSource = 'browser_storage';
-  @property() _rawYaml = '';
+  @property({ attribute: false }) _configSource: ConfigSource = 'browser_storage';
+  @property({ attribute: false }) _rawYaml = '';
 
   @query('ha-yaml-editor') _yamlEditor!: any;
 
@@ -46,6 +46,20 @@ export class SidebarDialogCodeEditor extends BaseEditor {
       .header-row.center {
         justify-content: center;
       }
+      .raw-yaml-editor {
+        background: var(--code-editor-background-color, var(--card-background-color));
+        border: 1px solid var(--divider-color);
+        border-radius: 4px;
+        box-sizing: border-box;
+        color: var(--primary-text-color);
+        font-family: var(--ha-font-family-code, monospace);
+        font-size: 0.9rem;
+        line-height: 1.45;
+        min-height: 320px;
+        padding: 12px;
+        resize: vertical;
+        width: 100%;
+      }
     `;
   }
 
@@ -55,6 +69,28 @@ export class SidebarDialogCodeEditor extends BaseEditor {
     const isConfigEmpty = Object.keys(initConfig).length === 0;
     const emptyConfig = html`<ha-alert alertType="info">${ALERT_MSG.CONFIG_EMPTY}</ha-alert>`;
     const editorValue = this._editorValue();
+    const rawYaml = this._yamlText();
+
+    if (this._configSource === 'home_assistant_config') {
+      return html`
+        ${isConfigEmpty ? emptyConfig : nothing}
+        <textarea class="raw-yaml-editor" spellcheck="false" .value=${rawYaml} @input=${this._handleRawYamlInput}>
+        </textarea>
+        <div class="header-row" ?hidden=${isConfigEmpty}>
+          <div>
+            <ha-button appearance="plain" size="small" @click=${() => this._handleBtnAction('download')}
+              >${BTN_LABEL.DOWNLOAD}</ha-button
+            >
+            <ha-button appearance="plain" size="small" @click=${() => this._handleBtnAction('copy')}
+              >${BTN_LABEL.COPY_TO_CLIPBOARD}</ha-button
+            >
+          </div>
+          <ha-button appearance="plain" size="small" variant="warning" @click=${() => this._handleBtnAction('delete')}
+            >${BTN_LABEL.DELETE}</ha-button
+          >
+        </div>
+      `;
+    }
 
     const editor = html` ${isConfigEmpty ? emptyConfig : nothing}
       <ha-yaml-editor
@@ -104,6 +140,25 @@ export class SidebarDialogCodeEditor extends BaseEditor {
     }
   }
 
+  private _handleRawYamlInput(ev: Event): void {
+    const yaml = (ev.target as HTMLTextAreaElement).value;
+    this.dispatchEvent(
+      new CustomEvent('raw-yaml-changed', {
+        bubbles: true,
+        composed: true,
+        detail: { yaml },
+      })
+    );
+
+    try {
+      const value = (YAML.parse(yaml) || {}) as SidebarConfig;
+      this._sidebarConfig = value;
+      this._dispatchConfig(value);
+    } catch (err) {
+      console.warn('Raw YAML is not valid yet', err);
+    }
+  }
+
   private _handleBtnAction = async (action: string) => {
     switch (action) {
       case 'download':
@@ -116,10 +171,7 @@ export class SidebarDialogCodeEditor extends BaseEditor {
           filename = `${CONFIG_NAME + '_' + new Date().toISOString().replace(/:/g, '-').split('.', 1).join()}`;
         }
 
-        const data =
-          this._configSource === 'home_assistant_config' && this._rawYaml.trim()
-            ? this._rawYaml
-            : YAML.stringify(this._sidebarConfig);
+        const data = this._yamlText();
 
         // Create a blob from the data
         const blob = new Blob([data], { type: 'application/x-yaml' });
@@ -131,11 +183,7 @@ export class SidebarDialogCodeEditor extends BaseEditor {
         break;
       case 'copy':
         navigator.clipboard
-          .writeText(
-            this._configSource === 'home_assistant_config' && this._rawYaml.trim()
-              ? this._rawYaml
-              : YAML.stringify(this._sidebarConfig)
-          )
+          .writeText(this._yamlText())
           .then(() => {
             console.log('Copied to clipboard');
           });
@@ -158,6 +206,12 @@ export class SidebarDialogCodeEditor extends BaseEditor {
         break;
     }
   };
+
+  private _yamlText(): string {
+    return this._configSource === 'home_assistant_config' && this._rawYaml.trim()
+      ? this._rawYaml
+      : YAML.stringify(this._sidebarConfig);
+  }
 
   private _editorValue(): SidebarConfig {
     if (this._configSource !== 'home_assistant_config' || !this._rawYaml.trim()) {

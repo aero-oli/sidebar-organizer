@@ -104,8 +104,8 @@ default_collapsed: {}
 
     def test_frontend_module_url_includes_version_cache_buster(self) -> None:
         self.assertEqual(
-            frontend_module_url("4.1.0"),
-            "/sidebar_organizer/frontend/sidebar-organizer.js?v=4.1.0",
+            frontend_module_url("4.1.1"),
+            "/sidebar_organizer/frontend/sidebar-organizer.js?v=4.1.1",
         )
 
     def test_file_metadata_reports_missing_file(self) -> None:
