@@ -17,6 +17,7 @@ SPEC.loader.exec_module(helpers)
 atomic_write_text = helpers.atomic_write_text
 resolve_config_path = helpers.resolve_config_path
 validate_yaml_config = helpers.validate_yaml_config
+frontend_module_url = helpers.frontend_module_url
 
 
 class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
@@ -71,6 +72,12 @@ default_collapsed: {}
             atomic_write_text(target, "bottom_items: []\n")
 
             self.assertEqual(target.read_text(encoding="utf-8"), "bottom_items: []\n")
+
+    def test_frontend_module_url_includes_version_cache_buster(self) -> None:
+        self.assertEqual(
+            frontend_module_url("4.0.3"),
+            "/sidebar_organizer/frontend/sidebar-organizer.js?v=4.0.3",
+        )
 
 
 if __name__ == "__main__":

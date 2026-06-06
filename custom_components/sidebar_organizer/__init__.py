@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
+from homeassistant.components import frontend
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
@@ -17,8 +20,11 @@ from .const import (
     DEFAULT_CONFIG_PATH,
     DEFAULT_CREATE_IF_MISSING,
     DOMAIN,
+    FRONTEND_JS,
+    FRONTEND_URL_BASE,
+    FRONTEND_VERSION,
 )
-from .helpers import DEFAULT_CONFIG_YAML, atomic_write_text, resolve_config_path
+from .helpers import DEFAULT_CONFIG_YAML, atomic_write_text, frontend_module_url, resolve_config_path
 from .websocket_api import async_register_websocket_commands
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,6 +65,20 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     if not resolved_path.exists() and create_if_missing:
         await hass.async_add_executor_job(atomic_write_text, resolved_path, DEFAULT_CONFIG_YAML)
 
+    await _async_register_frontend(hass)
     async_register_websocket_commands(hass)
     return True
 
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Serve and load the bundled Sidebar Organizer frontend module."""
+    frontend_dir = Path(__file__).parent / "frontend"
+    frontend_file = frontend_dir / FRONTEND_JS
+    if not frontend_file.exists():
+        _LOGGER.error("Sidebar Organizer frontend file is missing: %s", frontend_file)
+        return
+
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(FRONTEND_URL_BASE, str(frontend_dir), True)]
+    )
+    frontend.add_extra_js_url(hass, frontend_module_url(FRONTEND_VERSION))

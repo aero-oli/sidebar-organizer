@@ -1,6 +1,6 @@
 {
   "name": "sidebar-organizer",
-  "version": "4.0.2",
+  "version": "4.0.3",
   "module": "dist/sidebar-organizer.js",
   "author": "Viet Ngoc",
   "license": "MIT",
@@ -57,7 +57,8 @@
   },
   "scripts": {
     "start": "rollup -c rollup.config.js --bundleConfigAsCjs --watch",
-    "build": "pnpm run lint && pnpm run rollup",
+    "build": "pnpm run lint && pnpm run rollup && pnpm run copy:integration-frontend",
+    "copy:integration-frontend": "mkdir -p custom_components/sidebar_organizer/frontend && cp build/sidebar-organizer.js custom_components/sidebar_organizer/frontend/sidebar-organizer.js",
     "rollup": "rollup -c rollup.config.js --bundleConfigAsCjs",
     "lint": "eslint src/ --ext .ts --fix",
     "test": "node --import tsx --test tests/frontend/*.test.ts && python3 -m unittest discover -s tests/backend",

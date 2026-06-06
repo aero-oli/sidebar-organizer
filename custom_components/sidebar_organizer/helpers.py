@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from .const import FRONTEND_JS, FRONTEND_URL_BASE
+except ImportError:  # pragma: no cover - used by lightweight direct module tests.
+    FRONTEND_JS = "sidebar-organizer.js"
+    FRONTEND_URL_BASE = "/sidebar_organizer/frontend"
+
+try:
     import yaml
 except ModuleNotFoundError:  # pragma: no cover - Home Assistant provides PyYAML.
     yaml = None
@@ -106,6 +112,11 @@ def atomic_write_text(target: Path, content: str) -> None:
     finally:
         if temp_path.exists():
             temp_path.unlink()
+
+
+def frontend_module_url(version: str) -> str:
+    """Return the frontend module URL registered by the integration."""
+    return f"{FRONTEND_URL_BASE}/{FRONTEND_JS}?v={version}"
 
 
 def _is_list_of_strings(value: Any) -> bool:

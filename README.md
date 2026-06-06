@@ -45,7 +45,7 @@
 
 ## Introduction
 
-**Sidebar Organizer** is a custom Home Assistant plugin designed to give you full control over the layout and organization of the sidebar. It allows you to customize the appearance, group items, and reorder or collapse items for a cleaner, more intuitive navigation experience.
+**Sidebar Organizer** is a custom Home Assistant integration designed to give you full control over the layout and organization of the sidebar. It allows you to customize the appearance, group items, and reorder or collapse items for a cleaner, more intuitive navigation experience.
 
 With Sidebar Organizer, managing the sidebar in Home Assistant becomes easy and flexible. Whether you want to declutter your sidebar or create a more streamlined view, Sidebar Organizer is here to help.
 
@@ -62,68 +62,49 @@ With Sidebar Organizer, managing the sidebar in Home Assistant becomes easy and 
 
 ## [HACS](https://hacs.xyz) (Home Assistant Community Store)
 
-If you have not disabled the [My Home Assistant], just click on the button to go to the plugin's page, otherwise follow the next steps:
+If you have not disabled [My Home Assistant], click the button below to add this repository to HACS as an integration. Otherwise, add `aero-oli/sidebar-organizer` manually as a custom repository with category `Integration`.
 
 [![open-hacs-repo-badge]][hacs-repo-custom-url]
 
-### Install the plugin
+### Install the integration
 
 1. Go to HACS page on your Home Assistant instance
 1. Search for `Sidebar Organizer`
-1. Select Sidebar Organizer repo and install
-1. When the plugin is already downloaded, add the url of the plugin as an extra_module_url in your configuration.yaml.
+1. Select Sidebar Organizer repo and install it as an `Integration`
+1. Add the backend configuration to `configuration.yaml`
+1. Restart Home Assistant
+1. Open Sidebar Organizer and select `Home Assistant config folder` as the config source
 
-When installing through HACS your lovelace resource definition will be automatically added in Dashboard resources which you can access via the button below and and search for `sidebar-organizer`
-
-[![Open-dashboard-resources]][dashboard-resources-link]
-
-![Dashboard resources](assets/dashboard-resources.png)
-
-Example lovelace resource definition when installed through HACS.
-
-```
-/hacsfiles/sidebar-organizer/sidebar-organizer.js?hacstag=123456789
-```
-
-In configuration.yaml add this exact path to `frontend: extra_module_url:` When updating plugin through HACS make sure to update your `extra_module_url:` manually to match.
-This is critically important as it prevents the resource being loaded twice.
+Sidebar Organizer v4.0.3 and newer is packaged as a Home Assistant custom integration. The integration serves and loads the frontend module automatically, so you do not need a separate Dashboard resource or `frontend.extra_module_url` entry.
 
 ```yaml
-frontend:
-  extra_module_url:
-    - /hacsfiles/sidebar-organizer/sidebar-organizer.js?hacstag=123456789
-```
-
-4. Restart Home Assistant
-
-## Optional backend integration for private config-folder YAML
-
-Sidebar Organizer is primarily installed as a HACS frontend/plugin resource. HACS frontend plugin repositories may not install `custom_components` automatically, so the backend integration in this repository is optional and may need to be installed manually.
-
-Use the backend integration when you want one shared YAML file in the private Home Assistant config directory, for example `/config/sidebar-organizer.yaml`, instead of browser local storage or a public `/local` file.
-
-1. Copy `custom_components/sidebar_organizer` from this repository to `/config/custom_components/sidebar_organizer`.
-2. Add the backend configuration to `configuration.yaml`.
-3. Restart Home Assistant.
-4. Open Sidebar Organizer and select `Home Assistant config folder` as the config source.
-
-```yaml
-frontend:
-  extra_module_url:
-    - /hacsfiles/sidebar-organizer/sidebar-organizer.js
-
 sidebar_organizer:
   config_path: sidebar-organizer.yaml
   allow_write: true
   create_if_missing: true
 ```
 
+> [!IMPORTANT]
+> If you previously installed Sidebar Organizer as a HACS Dashboard/frontend plugin, remove the old Dashboard resource and remove any `frontend.extra_module_url` entry for `/hacsfiles/sidebar-organizer/sidebar-organizer.js` or `/local/sidebar-organizer.js`. Loading both the old plugin resource and the new integration module can register the same custom elements twice.
+
 `config_path` is resolved under the Home Assistant config directory. You can also use a subdirectory such as `configs/sidebar-organizer.yaml`.
 
-## Manual
+## Manual integration install
 
 <details>
-  <summary>Click to expand installation instructions</summary>
+  <summary>Click to expand manual integration installation instructions</summary>
+
+1. Download the release source archive.
+2. Copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`.
+3. Add the `sidebar_organizer:` YAML block shown above to `configuration.yaml`.
+4. Restart Home Assistant.
+
+</details>
+
+## Legacy manual frontend install
+
+<details>
+  <summary>Click to expand legacy frontend-only installation instructions</summary>
 
 1. Download the [sidebar-organizer.js].
 2. Place the downloaded file on your Home Assistant machine in the `config/www` folder (when there is no `www` folder in the folder where your `configuration.yaml` file is, create it and place the file there).
@@ -138,6 +119,8 @@ frontend:
 
 > [!TIP]
 > It is recommended that you use a cache busting technique to assist with caching of old files on update (e.g. `.../sidebar-organizer.js?v2.0.0`).
+
+The legacy frontend-only install supports browser storage and `/local/sidebar-organizer.yaml`, but it cannot read or write private Home Assistant config-folder YAML because it does not install the backend WebSocket API.
 
 </details>
 
@@ -280,11 +263,11 @@ In this section, you can organize the layout of the sidebar panels by customizin
 
   - `Browser storage`: the existing local browser storage behavior.
   - `Static YAML file from /local`: the existing `/config/www/sidebar-organizer.yaml` file, served as `/local/sidebar-organizer.yaml`.
-  - `Home Assistant config folder`: the optional backend integration reads and writes a private config-folder YAML file through authenticated Home Assistant WebSocket commands.
+  - `Home Assistant config folder`: the integration reads and writes a private config-folder YAML file through authenticated Home Assistant WebSocket commands.
 
 - The static `/local` file is useful for sharing one file URL, but `/config/www` is a public/static frontend resource path. It is not the same as private config-folder storage.
 
-- The Home Assistant config-folder mode uses the optional `sidebar_organizer` backend integration. The frontend does not send arbitrary file paths by default; the backend owns the configured path.
+- The Home Assistant config-folder mode uses the `sidebar_organizer` backend integration. The frontend does not send arbitrary file paths by default; the backend owns the configured path.
 
   ![Config RAW Code](assets/config-raw-code.png)
 
@@ -333,19 +316,19 @@ Security notes:
 
 Troubleshooting:
 
-- Backend unavailable: copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`, add `sidebar_organizer:` to `configuration.yaml`, then restart Home Assistant.
+- Backend unavailable: make sure Sidebar Organizer is installed in HACS as an `Integration`, not as a `Dashboard` resource. For manual installs, copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`, add `sidebar_organizer:` to `configuration.yaml`, then restart Home Assistant.
 - Invalid YAML: use `Validate YAML` in the config dialog or check the Home Assistant log. Invalid YAML is reported and should not crash the sidebar.
 - File missing: set `create_if_missing: true` or create the file manually.
 - Write disabled: set `allow_write: true` and restart Home Assistant.
 - Non-admin user cannot write: sign in with an admin user for save operations.
-- Browser still showing stale sidebar: reload from HA config, then hard refresh the browser. For HACS resource changes, update the resource URL/cache tag if needed.
+- Browser still showing stale sidebar: reload from HA config, then hard refresh the browser. If you upgraded from the old frontend plugin install, remove the old Dashboard resource and `frontend.extra_module_url` entry so the frontend is not loaded twice.
 
 Manual test checklist:
 
 1. Build frontend: `pnpm install` then `pnpm run build`.
-2. Copy the built JS to Home Assistant, or use the existing HACS resource path.
-3. Copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`.
-4. Add `sidebar_organizer:` config to `configuration.yaml`.
+2. Install the release through HACS as an `Integration`, or copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`.
+3. Add `sidebar_organizer:` config to `configuration.yaml`.
+4. Remove any old Dashboard resource or `frontend.extra_module_url` entry for Sidebar Organizer.
 5. Restart Home Assistant.
 6. Open Sidebar Organizer config.
 7. Select `Home Assistant config folder`.
@@ -367,14 +350,14 @@ Manual test checklist:
 <!--Badges-->
 
 [hacs-default]: https://img.shields.io/badge/HACS-Default-blue?style=flat&logo=homeassistantcommunitystore&logoSize=auto
-[hacs-default-link]: https://my.home-assistant.io/redirect/hacs_repository/?owner=ngocjohn&repository=sidebar-organizer&category=plugin
+[hacs-default-link]: https://my.home-assistant.io/redirect/hacs_repository/?owner=aero-oli&repository=sidebar-organizer&category=integration
 [forum-url]: https://community.home-assistant.io/t/sidebar-organizer
 [forum-badge]: https://img.shields.io/badge/forum-community?style=flat&logo=homeassistant&label=community&color=blue
-[hacs-validate]: https://github.com/ngocjohn/sidebar-organizer/actions/workflows/validate.yml/badge.svg
-[hacs-url]: https://github.com/ngocjohn/sidebar-organizer/actions/workflows/validate.yml
-[git-last-commit-badge]: https://img.shields.io/github/last-commit/ngocjohn/sidebar-organizer
-[git-download-all-badge]: https://img.shields.io/github/downloads/ngocjohn/sidebar-organizer/total?style=flat&logo=homeassistantcommunitystore&logoSize=auto&label=Downloads&color=%2318BCF2
-[git-download-latest-badge]: https://img.shields.io/github/downloads/ngocjohn/sidebar-organizer/latest/total?style=flat&logo=homeassistantcommunitystore&logoSize=auto
+[hacs-validate]: https://github.com/aero-oli/sidebar-organizer/actions/workflows/validate.yml/badge.svg
+[hacs-url]: https://github.com/aero-oli/sidebar-organizer/actions/workflows/validate.yml
+[git-last-commit-badge]: https://img.shields.io/github/last-commit/aero-oli/sidebar-organizer
+[git-download-all-badge]: https://img.shields.io/github/downloads/aero-oli/sidebar-organizer/total?style=flat&logo=homeassistantcommunitystore&logoSize=auto&label=Downloads&color=%2318BCF2
+[git-download-latest-badge]: https://img.shields.io/github/downloads/aero-oli/sidebar-organizer/latest/total?style=flat&logo=homeassistantcommunitystore&logoSize=auto
 
 <!--Urls-->
 
@@ -383,5 +366,5 @@ Manual test checklist:
 [Open-dashboard-resources]: https://my.home-assistant.io/badges/lovelace_resources.svg
 [dashboard-resources-link]: https://my.home-assistant.io/redirect/lovelace_resources/
 [open-hacs-repo-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
-[hacs-repo-custom-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=ngocjohn&repository=sidebar-organizer&category=plugin
-[sidebar-organizer.js]: https://github.com/ngocjohn/sidebar-organizer/releases/latest
+[hacs-repo-custom-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=aero-oli&repository=sidebar-organizer&category=integration
+[sidebar-organizer.js]: https://github.com/aero-oli/sidebar-organizer/releases/latest
