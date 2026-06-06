@@ -32,10 +32,10 @@ export class HomeAssistantConfigProvider implements SidebarConfigProvider {
       const parsed = parseSidebarYamlConfig(rawYaml);
 
       if (response.valid === false && response.errors?.length) {
-        return { ...parsed, errors: response.errors, valid: false };
+        return { ...parsed, errors: response.errors, last_modified: response.last_modified, valid: false };
       }
 
-      return parsed;
+      return { ...parsed, last_modified: response.last_modified };
     } catch (err) {
       return {
         errors: [this._errorMessage(err)],
@@ -74,4 +74,3 @@ export class HomeAssistantConfigProvider implements SidebarConfigProvider {
     return `sidebar_organizer backend unavailable or failed: ${message}`;
   }
 }
-

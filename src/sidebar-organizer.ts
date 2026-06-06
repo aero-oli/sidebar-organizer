@@ -1,4 +1,4 @@
-import type { ConfigSource } from './config';
+import type { ConfigSource } from './config/types';
 
 import {
   ALERT_MSG,
@@ -31,8 +31,6 @@ import {
 } from '@types';
 import { _getDarkConfigMode, applyTheme } from '@utilities/apply-theme';
 import { compareHacsTagDiff } from '@utilities/compare-urls';
-
-import './components/so-group-divider';
 import { fetchConfig } from '@utilities/configs';
 import {
   atLeastVersion,
@@ -40,6 +38,8 @@ import {
   getCollapsedItems,
   normalizePinnedGroups,
 } from '@utilities/configs/misc';
+
+import './components/so-group-divider';
 import { getDefaultThemeColors, convertCustomStyles } from '@utilities/custom-styles';
 import { addAction, mapItemsForDebug, nextRender, onPanelLoaded, parseItemValues } from '@utilities/dom-utils';
 import { clearSidebarUserData, fetchFrontendUserData } from '@utilities/frontend';
@@ -61,6 +61,8 @@ import { HAElement, HAQuerySelector, HAQuerySelectorEvent, OnListenDetail } from
 import { HomeAssistantStylesManager } from 'home-assistant-styles-manager';
 
 import { SoGroupDivider } from './components/so-group-divider';
+import { isHaConfigModified, parseStoredLastModified } from './config/ha-config-refresh';
+import { HomeAssistantConfigProvider } from './config/providers/ha-config-provider';
 import { DIVIDER_ADDED_STYLE, DRAWER_STYLE, HA_MAIN_CUSTOM_WIDTH_STYLE, HUI_ROOT_STYLE } from './sidebar-css';
 
 export class SidebarOrganizer {
@@ -159,6 +161,7 @@ export class SidebarOrganizer {
   public _hiddenPanels: string[] = [];
 
   private _sidebarObserver: MutationObserver;
+  private _haConfigRefreshInterval?: number;
 
   get hass(): HaExtened['hass'] {
     return this._ha!.hass;
@@ -213,6 +216,7 @@ export class SidebarOrganizer {
     if (!this._userHasSidebarSettings) {
       await this._getConfig().then(() => {
         this._watchScrollHideHeader();
+        this._watchHaConfigRefresh();
         this._setupInitialConfig();
       });
       this._processSections();
@@ -363,6 +367,39 @@ export class SidebarOrganizer {
 
     window.addEventListener('popstate', callback);
   }
+
+  private _watchHaConfigRefresh(): void {
+    if (this._haConfigRefreshInterval !== undefined || getConfigSource() !== 'home_assistant_config') return;
+
+    window.addEventListener('focus', this._checkHaConfigRefresh);
+    document.addEventListener('visibilitychange', this._handleVisibilityHaConfigRefresh);
+    this._haConfigRefreshInterval = window.setInterval(this._checkHaConfigRefresh, 30 * 1000);
+  }
+
+  private _handleVisibilityHaConfigRefresh = (): void => {
+    if (document.visibilityState === 'visible') {
+      this._checkHaConfigRefresh();
+    }
+  };
+
+  private _checkHaConfigRefresh = async (): Promise<void> => {
+    if (getConfigSource() !== 'home_assistant_config' || !this.hass) return;
+
+    const provider = new HomeAssistantConfigProvider(this.hass);
+    const info = await provider.info();
+    if (!info.available || info.last_modified == null) return;
+
+    const storedLastModified = parseStoredLastModified(localStorage.getItem(STORAGE.HA_CONFIG_LAST_MODIFIED));
+    if (storedLastModified === undefined) {
+      setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, info.last_modified);
+      return;
+    }
+
+    if (isHaConfigModified(storedLastModified, info.last_modified)) {
+      setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, info.last_modified);
+      this._reloadWindow();
+    }
+  };
 
   private async _checkDashboardChange(): Promise<void> {
     if (this._userHasSidebarSettings || !this._baseOrder.length) {

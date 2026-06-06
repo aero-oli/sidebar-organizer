@@ -16,6 +16,7 @@ export interface ConfigProviderInfo {
 export interface ParsedSidebarYaml {
   config?: SidebarConfig;
   errors: string[];
+  last_modified?: number | null;
   rawYaml?: string;
   valid: boolean;
 }
@@ -30,4 +31,3 @@ export interface SidebarConfigProvider {
 export interface HassWithCallWS {
   callWS<T>(message: Record<string, unknown>): Promise<T>;
 }
-

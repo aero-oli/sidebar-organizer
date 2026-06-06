@@ -910,6 +910,9 @@ export class SidebarConfigDialog extends BaseEditor {
       this._haConfigInfo = await provider.write(yaml);
       this._haConfigErrors = [];
       setStorage(STORAGE.HA_CONFIG_CACHE, this._sidebarConfig);
+      if (this._haConfigInfo.last_modified != null) {
+        setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, this._haConfigInfo.last_modified);
+      }
       await showAlertDialog(this, ALERT_MSG.HA_CONFIG_SAVE_SUCCESS, 'OK');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -929,6 +932,9 @@ export class SidebarConfigDialog extends BaseEditor {
     this._sidebarConfig = result.config;
     this._haConfigErrors = [];
     setStorage(STORAGE.HA_CONFIG_CACHE, result.config);
+    if (result.last_modified != null) {
+      setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, result.last_modified);
+    }
     await this._refreshHaConfigInfo();
     await showAlertDialog(this, ALERT_MSG.HA_CONFIG_RELOAD_SUCCESS, 'OK');
   };

@@ -75,6 +75,9 @@ export const fetchHaConfig = async (hass: HaExtened['hass']): Promise<SidebarCon
   const result = await provider.read();
   if (result.valid && result.config) {
     setStorage(STORAGE.HA_CONFIG_CACHE, result.config);
+    if (result.last_modified != null) {
+      setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, result.last_modified);
+    }
     return result.config;
   }
 

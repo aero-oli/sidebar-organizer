@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
+import { isHaConfigModified } from '../../src/config/ha-config-refresh';
 import { HomeAssistantConfigProvider } from '../../src/config/providers/ha-config-provider';
 import { parseSidebarYamlConfig } from '../../src/config/validation';
 
@@ -57,7 +58,9 @@ describe('HomeAssistantConfigProvider', () => {
     const provider = new HomeAssistantConfigProvider(hass as never);
 
     assert.equal((await provider.info()).available, true);
-    assert.equal((await provider.read()).config?.bottom_items?.length, 0);
+    const readResult = await provider.read();
+    assert.equal(readResult.config?.bottom_items?.length, 0);
+    assert.equal(readResult.last_modified, 1710000000);
     assert.equal((await provider.validate('bottom_items: []')).valid, true);
     await provider.write('bottom_items: []');
 
@@ -95,5 +98,14 @@ describe('HomeAssistantConfigProvider', () => {
     assert.equal(result.valid, false);
     assert.equal(result.config, undefined);
     assert.ok(result.errors[0].includes('YAML'));
+  });
+});
+
+describe('isHaConfigModified', () => {
+  it('detects newer backend config metadata', () => {
+    assert.equal(isHaConfigModified(100, 101), true);
+    assert.equal(isHaConfigModified(100, 100), false);
+    assert.equal(isHaConfigModified(undefined, 100), false);
+    assert.equal(isHaConfigModified(100, undefined), false);
   });
 });
