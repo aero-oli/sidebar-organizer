@@ -37,6 +37,9 @@ export default {
       '@semantic-release/github',
       {
         assets: 'build/*.js',
+        failComment: false,
+        releasedLabels: false,
+        successComment: false,
       },
     ],
   ],
