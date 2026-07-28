@@ -109,9 +109,10 @@ export class SidebarOrganizerDialogWA extends LitElement implements HassDialog<S
 
   private async _handleSaveConfig(): Promise<void> {
     if (!this._canSaveConfig) {
-      console.warn('Cannot save config, it is not valid or has unsaved changes.');
+      const message = this._configDialog.saveBlockedReason || 'This configuration cannot be saved yet.';
+      console.warn(message);
       showToast(this, {
-        message: 'Cannot save config, it is not valid or has unsaved changes.',
+        message,
         duration: 5000,
       });
       return;
@@ -198,22 +199,23 @@ export class SidebarOrganizerDialogWA extends LitElement implements HassDialog<S
         <ha-dialog-footer slot="footer">
           <ha-button
             appearance="plain"
-            size="small"
+            size="s"
             class="gui-mode-button"
             slot=${SLOT.SECONDARY_ACTION}
             @click=${this._toggleCodeUi}
           >
             ${this._GUImode ? BTN_LABEL.SHOW_CODE_EDITOR : BTN_LABEL.SHOW_VISUAL_EDITOR}
           </ha-button>
-          <ha-button appearance="plain" size="small" slot=${SLOT.SECONDARY_ACTION} @click=${this.closeDialog}>
+          <ha-button appearance="plain" size="s" slot=${SLOT.SECONDARY_ACTION} @click=${this.closeDialog}>
             ${BTN_LABEL.CANCEL}
           </ha-button>
 
           <ha-button
             appearance="plain"
-            size="small"
+            size="s"
             slot=${SLOT.PRIMARY_ACTION}
             .label=${BTN_LABEL.SAVE}
+            .title=${this._configDialog?.saveBlockedReason || ''}
             @click=${this._handleSaveConfig}
             .disabled=${this._saveDisabled}
           >
@@ -307,8 +309,25 @@ export class SidebarOrganizerDialogWA extends LitElement implements HassDialog<S
           }
         }
         .content {
+          box-sizing: border-box;
+          min-height: 0;
+          overflow-y: auto;
+          overscroll-behavior-y: contain;
+          scrollbar-color: var(--scrollbar-thumb-color, rgba(127, 127, 127, 0.55)) transparent;
+          scrollbar-gutter: stable;
+          scrollbar-width: thin;
+          touch-action: pan-y;
           width: 100%;
           max-width: 100%;
+        }
+        .content::-webkit-scrollbar {
+          width: 10px;
+        }
+        .content::-webkit-scrollbar-thumb {
+          background: var(--scrollbar-thumb-color, rgba(127, 127, 127, 0.55));
+          border: 2px solid transparent;
+          border-radius: 999px;
+          background-clip: padding-box;
         }
 
         @media all and (max-width: 450px), all and (max-height: 500px) {

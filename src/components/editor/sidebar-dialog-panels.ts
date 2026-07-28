@@ -244,7 +244,7 @@ export class SidebarDialogPanels extends BaseEditor {
       ${panelName.toUpperCase()}
       <ha-button
         appearance="plain"
-        size="small"
+        size="s"
         @click=${() => {
           this._selectedNotification = null;
         }}
@@ -414,7 +414,7 @@ export class SidebarDialogPanels extends BaseEditor {
           `}
 
       <div class="header-row flex-end">
-        <ha-button appearance="plain" size="small" @click=${this._togglePromptNewGroup}> Add New Group </ha-button>
+        <ha-button appearance="plain" size="s" @click=${this._togglePromptNewGroup}> Add New Group </ha-button>
       </div>
     `;
   }
@@ -635,7 +635,7 @@ export class SidebarDialogPanels extends BaseEditor {
       ${this._selectedGroup.toLocaleUpperCase()}
       <ha-button
         appearance="plain"
-        size="small"
+        size="s"
         @click=${() => this._handleGroupAction('preview', this._selectedGroup!)}
       >
         PREVIEW
@@ -706,7 +706,7 @@ export class SidebarDialogPanels extends BaseEditor {
             </div>
           `}
       <div class="header-row flex-end">
-        <ha-button appearance="plain" size="small" @click=${this._addBottomGroup}> Add New Group </ha-button>
+        <ha-button appearance="plain" size="s" @click=${this._addBottomGroup}> Add New Group </ha-button>
       </div>
       ${this._selectedBottomGroup
         ? html`

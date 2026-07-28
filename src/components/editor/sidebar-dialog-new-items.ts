@@ -147,7 +147,7 @@ export class SidebarDialogNewItems extends BaseEditor {
 
   private _renderNewItemsList(): TemplateResult | typeof nothing {
     if (this._selectedItemIndex !== null) return nothing;
-    const addBtn = html` <ha-button size="small" @click=${this._togglePromptNewItem}>Add new item </ha-button> `;
+    const addBtn = html` <ha-button size="s" @click=${this._togglePromptNewItem}>Add new item </ha-button> `;
     const newItems = this._sidebarConfig?.new_items || [];
 
     const newItemsList = html`
@@ -243,7 +243,7 @@ export class SidebarDialogNewItems extends BaseEditor {
                 <div class="group-actions">
                   <ha-button
                     appearance="plain"
-                    size="small"
+                    size="s"
                     @click=${this._toggleRenameItem.bind(this, this._selectedItemIndex!)}
                     >Rename</ha-button
                   >
@@ -273,7 +273,7 @@ export class SidebarDialogNewItems extends BaseEditor {
         <div class="header-row flex-end">
           <ha-button
             appearance="plain"
-            size="small"
+            size="s"
             @click=${() => {
               this._yamlMode = !this._yamlMode;
             }}

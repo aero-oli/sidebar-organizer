@@ -78,14 +78,14 @@ export class SidebarDialogCodeEditor extends BaseEditor {
         </textarea>
         <div class="header-row" ?hidden=${isConfigEmpty}>
           <div>
-            <ha-button appearance="plain" size="small" @click=${() => this._handleBtnAction('download')}
+            <ha-button appearance="plain" size="s" @click=${() => this._handleBtnAction('download')}
               >${BTN_LABEL.DOWNLOAD}</ha-button
             >
-            <ha-button appearance="plain" size="small" @click=${() => this._handleBtnAction('copy')}
+            <ha-button appearance="plain" size="s" @click=${() => this._handleBtnAction('copy')}
               >${BTN_LABEL.COPY_TO_CLIPBOARD}</ha-button
             >
           </div>
-          <ha-button appearance="plain" size="small" variant="warning" @click=${() => this._handleBtnAction('delete')}
+          <ha-button appearance="plain" size="s" variant="warning" @click=${() => this._handleBtnAction('delete')}
             >${BTN_LABEL.DELETE}</ha-button
           >
         </div>
@@ -104,14 +104,14 @@ export class SidebarDialogCodeEditor extends BaseEditor {
       >
         <div class="header-row" slot="extra-actions" ?hidden=${isConfigEmpty}>
           <div>
-            <ha-button appearance="plain" size="small" @click=${() => this._handleBtnAction('download')}
+            <ha-button appearance="plain" size="s" @click=${() => this._handleBtnAction('download')}
               >${BTN_LABEL.DOWNLOAD}</ha-button
             >
-            <ha-button appearance="plain" size="small" size="small" @click=${() => this._handleBtnAction('copy')}
+            <ha-button appearance="plain" size="s" @click=${() => this._handleBtnAction('copy')}
               >${BTN_LABEL.COPY_TO_CLIPBOARD}</ha-button
             >
           </div>
-          <ha-button appearance="plain" size="small" variant="warning" @click=${() => this._handleBtnAction('delete')}
+          <ha-button appearance="plain" size="s" variant="warning" @click=${() => this._handleBtnAction('delete')}
             >${BTN_LABEL.DELETE}</ha-button
           >
         </div>

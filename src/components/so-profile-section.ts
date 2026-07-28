@@ -135,7 +135,7 @@ export class SoProfileSection extends LitElement {
                 <ha-button
                   slot="end"
                   appearance="plain"
-                  size="small"
+                  size="s"
                   variant=${action.variant || 'brand'}
                   .disabled=${isDisabled}
                   @click=${() => this._handleAction(action.action)}

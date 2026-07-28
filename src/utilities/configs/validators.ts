@@ -35,6 +35,15 @@ export const InvalidItemLabels: Record<InvalidItemKeys, string> = {
   hasDefaultInGroupsOrBottom: 'Default panel included',
 };
 
+/**
+ * Panel availability and the default dashboard are user-specific in Home
+ * Assistant. They are useful warnings, but they must not make a centrally
+ * stored sidebar unusable for everyone. Duplicate assignments are the one
+ * contextual error that is ambiguous enough to block saving/loading.
+ */
+export const hasBlockingConfigErrors = (result: INVALID_CONFIG): boolean =>
+  Boolean(result.repeatedItems?.length);
+
 export const validateConfig = (config: SidebarConfig, hidden?: string[]): SidebarConfig => {
   const hiddenPanels: string[] = hidden || getHiddenPanels();
   if (!hiddenPanels.length) return cleanConfig(config);
@@ -94,7 +103,7 @@ export const isItemsValid = async (
   const configResult = await isConfigValid(config, hass);
 
   if (!configResult.valid) {
-    const logTitle = `${CONFIG_NAME}: Config is not valid.`;
+    const logTitle = `${CONFIG_NAME}: Config has panel warnings.`;
     console.groupCollapsed(`%c${logTitle}`, 'color: #ff9800;');
     INVALID_ITEM_KEYS.forEach((key) => {
       const items = configResult[key] as string[];

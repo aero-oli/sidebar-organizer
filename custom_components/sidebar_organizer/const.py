@@ -18,5 +18,5 @@ PROFILE_LOCK = f"{DOMAIN}_profile_lock"
 PROFILE_SUBSCRIBERS = f"{DOMAIN}_profile_subscribers"
 
 FRONTEND_JS = "sidebar-organizer.js"
-FRONTEND_VERSION = "4.3.0"
+FRONTEND_VERSION = "4.3.1"
 FRONTEND_URL_BASE = f"/{DOMAIN}/frontend"

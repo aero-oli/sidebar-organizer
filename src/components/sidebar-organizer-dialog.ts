@@ -118,9 +118,10 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
 
   private async _handleSaveConfig(): Promise<void> {
     if (!this._canSaveConfig) {
-      console.warn('Cannot save config, it is not valid or has unsaved changes.');
+      const message = this._configDialog.saveBlockedReason || 'This configuration cannot be saved yet.';
+      console.warn(message);
       showToast(this, {
-        message: 'Cannot save config, it is not valid or has unsaved changes.',
+        message,
         duration: 5000,
       });
       return;
@@ -200,19 +201,20 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
 
         ${this._renderContent()}
 
-        <ha-button appearance="plain" size="small" slot=${SLOT.SECONDARY_ACTION} @click=${this._toggleCodeUi}
+        <ha-button appearance="plain" size="s" slot=${SLOT.SECONDARY_ACTION} @click=${this._toggleCodeUi}
           >${this._GUImode
             ? TRANSLATED_LABEL.BTN_LABEL.SHOW_CODE_EDITOR
             : TRANSLATED_LABEL.BTN_LABEL.SHOW_VISUAL_EDITOR}
         </ha-button>
         <div slot=${SLOT.PRIMARY_ACTION}>
-          <ha-button appearance="plain" size="small" .label=${BTN_LABEL.CANCEL} @click=${this.closeDialog}>
+          <ha-button appearance="plain" size="s" .label=${BTN_LABEL.CANCEL} @click=${this.closeDialog}>
             ${BTN_LABEL.CANCEL}
           </ha-button>
           <ha-button
             appearance="plain"
-            size="small"
+            size="s"
             .label=${BTN_LABEL.SAVE}
+            .title=${this._configDialog?.saveBlockedReason || ''}
             @click=${this._handleSaveConfig}
             .disabled=${this._saveDisabled}
           >

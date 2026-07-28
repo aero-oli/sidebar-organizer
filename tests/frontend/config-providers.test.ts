@@ -8,6 +8,7 @@ import { resolvePreferredConfigSource } from '../../src/config/source';
 import { parseSidebarYamlConfig } from '../../src/config/validation';
 import { defineCustomElementSafely } from '../../src/utilities/safe-custom-element';
 import { claimSidebarOrganizerModuleLoad } from '../../src/utilities/module-load-guard';
+import { hasBlockingConfigErrors } from '../../src/utilities/configs/validators';
 import {
   getScopedStorageKey,
   getStorage,
@@ -292,6 +293,27 @@ describe('isHaConfigModified', () => {
     assert.equal(isHaConfigModified(100, undefined), false);
     assert.equal(isHaConfigModified(null, 100), false);
     assert.equal(isHaConfigModified(100, null), false);
+  });
+});
+
+describe('Home Assistant panel validation severity', () => {
+  it('treats user-specific panel differences as warnings', () => {
+    assert.equal(
+      hasBlockingConfigErrors({
+        config: {},
+        hasDefaultInGroupsOrBottom: true,
+        invalidItems: ['home-yaml', 'admin-only'],
+        valid: false,
+      }),
+      false
+    );
+  });
+
+  it('blocks ambiguous duplicate panel assignments', () => {
+    assert.equal(
+      hasBlockingConfigErrors({ config: {}, repeatedItems: ['energy'], valid: false }),
+      true
+    );
   });
 });
 

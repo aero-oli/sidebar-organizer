@@ -36,7 +36,7 @@ export class SidebarDialogMenu extends BaseEditor {
               : nothing}
 
             <ha-dropdown
-              size="large"
+              size="l"
               placement="bottom-start"
               @wa-hide=${(ev: Event) => {
                 ev.stopPropagation();

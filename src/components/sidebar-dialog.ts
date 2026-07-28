@@ -2,6 +2,7 @@ import { ALERT_MSG, CONFIG_SECTION, DIALOG_TAG, STORAGE, TAB_STATE } from '@cons
 import { SidebarConfig, NewItemConfig, SidebardPanelConfig, PANEL_TYPE } from '@types';
 import {
   fetchFileConfig,
+  hasBlockingConfigErrors,
   INVALID_ITEM_KEYS,
   InvalidItemKeys,
   InvalidItemLabels,
@@ -90,6 +91,7 @@ export class SidebarConfigDialog extends BaseEditor {
   @state() private _uploading = false;
   @state() _invalidConfig?: INVALID_CONFIG;
   @state() private _haConfigErrors: string[] = [];
+  @state() private _panelWarnings: string[] = [];
   @state() private _haConfigInfo: ConfigProviderInfo = { available: false };
   @state() private _profileInfo: ProfileConfigInfo = { available: false };
   @state() private _profileUsers: SidebarProfileUser[] = [];
@@ -158,6 +160,15 @@ export class SidebarConfigDialog extends BaseEditor {
 
   public get selectedProfileUserId(): string | undefined {
     return this._configSource === 'home_assistant_profile' ? this._selectedProfile : undefined;
+  }
+
+  public get saveBlockedReason(): string | undefined {
+    if (!this.canWriteCurrentSource) return 'This configuration is read-only for your account.';
+    if (this._invalidConfig && hasBlockingConfigErrors(this._invalidConfig)) {
+      return 'A panel is assigned more than once. Remove the duplicate assignment before saving.';
+    }
+    if (!this.hasUnsavedChanges) return 'No unsaved changes.';
+    return undefined;
   }
 
   public get GUImode(): boolean {
@@ -456,12 +467,78 @@ export class SidebarConfigDialog extends BaseEditor {
   private _renderConfigSection(): TemplateResult {
     const selectedArea = this._currSection;
     const areaMap = {
+      [CONFIG_SECTION.GENERAL]: this._renderSettingsOverview(),
       [CONFIG_SECTION.APPEARANCE]: this._renderBaseConfig(),
       [CONFIG_SECTION.PANELS]: this._renderPanelConfig(),
       [CONFIG_SECTION.NEW_ITEMS]: this._renderNewItemsConfig(),
     };
 
     return areaMap[selectedArea] || html``;
+  }
+
+  private _renderSettingsOverview(): TemplateResult {
+    const source = this._configSource;
+    const usesHomeAssistant = source === 'home_assistant_config' || source === 'home_assistant_profile';
+    const selectedUser = this._profileUsers.find((user) => user.id === this._selectedProfile);
+    const activeConfiguration =
+      source === 'home_assistant_profile'
+        ? `Personal profile — ${selectedUser?.name || this.hass.user?.name || 'current user'}`
+        : source === 'home_assistant_config'
+          ? 'Shared default'
+          : source === 'static_yaml'
+            ? 'Legacy /local YAML file'
+            : 'This browser only';
+    const storageDescription = usesHomeAssistant
+      ? 'Saved by Home Assistant and automatically used on every device where this user signs in.'
+      : source === 'static_yaml'
+        ? 'Loaded from a legacy public YAML file. Changes are not managed by Home Assistant.'
+        : 'Saved only in this browser. It will not follow the user to another device.';
+    const info = source === 'home_assistant_profile' ? this._profileInfo : this._haConfigInfo;
+
+    return html`
+      <section class="settings-overview">
+        <div class="settings-card">
+          <div class="settings-card-heading">
+            <ha-icon icon=${usesHomeAssistant ? 'mdi:cloud-sync-outline' : 'mdi:database-outline'}></ha-icon>
+            <div>
+              <h2>Storage and user profiles</h2>
+              <p>${storageDescription}</p>
+            </div>
+            <span class="status-badge" data-active=${usesHomeAssistant}>${usesHomeAssistant ? 'Synced' : 'Local'}</span>
+          </div>
+
+          <div class="source-summary">
+            <span>Currently editing</span>
+            <strong>${activeConfiguration}</strong>
+          </div>
+
+          ${this._panelWarnings.map(
+            (warning) => html`<ha-alert alert-type="warning" class="panel-warning">${warning}</ha-alert>`
+          )}
+          ${this._invalidConfig && hasBlockingConfigErrors(this._invalidConfig)
+            ? html`<ha-alert alert-type="error">
+                A panel is assigned more than once. Open Panels and remove duplicate assignments before saving.
+              </ha-alert>`
+            : nothing}
+          ${this._haConfigErrors.length
+            ? html`<ha-alert alert-type="error">${this._haConfigErrors.join(' ')}</ha-alert>`
+            : nothing}
+
+          ${usesHomeAssistant
+            ? this._renderProfileSelector()
+            : html`<ha-alert alert-type="info">
+                Install and configure the Sidebar Organizer integration to sync sidebars through Home Assistant.
+              </ha-alert>`}
+
+          ${usesHomeAssistant
+            ? html`<details class="technical-details">
+                <summary>Technical details and maintenance</summary>
+                ${this._renderHaDiagnostics(info)}
+              </details>`
+            : nothing}
+        </div>
+      </section>
+    `;
   }
 
   private _renderSidebarPreview(): TemplateResult {
@@ -568,14 +645,14 @@ export class SidebarConfigDialog extends BaseEditor {
           <div slot="extra-actions" style="${extraActionsStyle}">
             <ha-button
               appearance="plain"
-              size="small"
+              size="s"
               .disabled=${isConfigValid}
               @click=${() => this._handleInvalidConfig('auto-correct')}
               >${BTN_LABEL.AUTO_CORRECT}</ha-button
             >
             <ha-button
               appearance="plain"
-              size="small"
+              size="s"
               destructive
               .label=${isConfigValid ? BTN_LABEL.SAVE_MIGRATE : BTN_LABEL.CHECK_VALIDITY}
               @click=${() => this._handleInvalidConfig(isConfigValid ? 'save' : 'check')}
@@ -663,7 +740,10 @@ export class SidebarConfigDialog extends BaseEditor {
 
     return html`
       <div class="profile-selector">
-        <span>Sidebar profile</span>
+        <div class="profile-selector-heading">
+          <strong>Sidebar used by</strong>
+          <span>Choose whose sidebar you want to view or manage.</span>
+        </div>
         <ha-selector
           .hass=${this.hass}
           .selector=${{ select: { mode: 'dropdown', options } }}
@@ -672,18 +752,18 @@ export class SidebarConfigDialog extends BaseEditor {
         ></ha-selector>
         <span>
           ${this._selectedProfile === 'shared'
-            ? 'Used by anyone without a personal profile.'
+            ? 'The shared default is used automatically by everyone without a personal profile.'
             : this._profileInfo.profile_exists
-              ? `Personal profile for ${selectedUser?.name || this._selectedProfile}.`
-              : `Currently inheriting the shared default for ${selectedUser?.name || this._selectedProfile}.`}
+              ? `${selectedUser?.name || this._selectedProfile} has a personal sidebar that overrides the shared default.`
+              : `${selectedUser?.name || this._selectedProfile} currently inherits the shared default.`}
         </span>
         ${this._selectedProfile !== 'shared' && !this._profileInfo.profile_exists && canManageSelected
-          ? html`<ha-button appearance="plain" size="small" @click=${this._createSelectedProfile}
+          ? html`<ha-button appearance="plain" size="s" @click=${this._createSelectedProfile}
               >Create personal copy</ha-button
             >`
           : nothing}
         ${this._selectedProfile !== 'shared' && this._profileInfo.profile_exists && canManageSelected
-          ? html`<ha-button appearance="plain" size="small" @click=${this._deleteSelectedProfile}
+          ? html`<ha-button appearance="plain" size="s" @click=${this._deleteSelectedProfile}
               >Reset to shared default</ha-button
             >`
           : nothing}
@@ -718,7 +798,7 @@ export class SidebarConfigDialog extends BaseEditor {
           .value=${this._copySource}
           @value-changed=${(event: CustomEvent<{ value: string }>) => (this._copySource = event.detail.value)}
         ></ha-selector>
-        <ha-button appearance="plain" size="small" @click=${this._copyIntoSelectedProfile}>Copy to selected user</ha-button>
+        <ha-button appearance="plain" size="s" @click=${this._copyIntoSelectedProfile}>Copy to selected user</ha-button>
       </div>
     `;
   }
@@ -744,7 +824,7 @@ export class SidebarConfigDialog extends BaseEditor {
           <ha-icon .icon=${icon}></ha-icon>
           <span>${label}</span>
         </div>
-        <ha-button appearance="plain" size="small" .label=${BTN_LABEL.UPLOAD} @click=${() => this._uploadConfigFile()}
+        <ha-button appearance="plain" size="s" .label=${BTN_LABEL.UPLOAD} @click=${() => this._uploadConfigFile()}
           >${BTN_LABEL.UPLOAD}</ha-button
         >
       </div>
@@ -769,13 +849,13 @@ export class SidebarConfigDialog extends BaseEditor {
       <div class="ha-config-actions">
         <ha-button
           appearance="plain"
-          size="small"
+          size="s"
           @click=${this._configSource === 'home_assistant_profile'
             ? this._reloadHomeAssistantProfile
             : this._reloadHomeAssistantConfig}
           >Reload from HA config</ha-button
         >
-        <ha-button appearance="plain" size="small" @click=${this._validateHomeAssistantYaml}>Validate YAML</ha-button>
+        <ha-button appearance="plain" size="s" @click=${this._validateHomeAssistantYaml}>Validate YAML</ha-button>
       </div>
     `;
   }
@@ -937,6 +1017,7 @@ export class SidebarConfigDialog extends BaseEditor {
     await this._refreshHaConfigInfo();
     if (!this._haConfigInfo.available) {
       this._haConfigErrors = [this._haConfigInfo.error || ALERT_MSG.HA_CONFIG_UNAVAILABLE];
+      this._panelWarnings = [];
       this._sidebarConfig = this._initConfig || {};
       this._baselineConfig = structuredClone(this._sidebarConfig);
       this._configLoaded = true;
@@ -948,6 +1029,7 @@ export class SidebarConfigDialog extends BaseEditor {
     const result = await provider.read();
     if (!result.valid || !result.config) {
       this._haConfigErrors = result.errors;
+      this._panelWarnings = [];
       this._sidebarConfig = this._initConfig || {};
       this._baselineConfig = structuredClone(this._sidebarConfig);
       this._configLoaded = true;
@@ -962,12 +1044,34 @@ export class SidebarConfigDialog extends BaseEditor {
     this._baselineConfig = structuredClone(result.config);
     const validationResult = (await isItemsValid(result.config, this.hass, true)) as INVALID_CONFIG;
     if (typeof validationResult === 'object' && validationResult !== null) {
-      this._invalidConfig = validationResult.valid ? undefined : validationResult;
+      this._applyHomeAssistantPanelValidation(validationResult);
     }
     const currentPanelOrder = JSON.parse(getStorage(STORAGE.PANEL_ORDER) || '[]');
     this._updateSidebarItems(currentPanelOrder, getHiddenPanels());
     this._startHaConfigPolling();
   };
+
+  private _applyHomeAssistantPanelValidation(validation: INVALID_CONFIG): void {
+    const defaultPanel = getDefaultPanelUrlPath(this.hass);
+    const unavailablePanels = Array.from(
+      new Set((validation.invalidItems || []).filter((panel) => panel !== defaultPanel))
+    );
+    const warnings: string[] = [];
+
+    if (validation.hasDefaultInGroupsOrBottom && defaultPanel) {
+      warnings.push(
+        `Your default dashboard (${defaultPanel}) stays fixed in the sidebar for this account, so its grouped copy is ignored. The saved configuration is unchanged.`
+      );
+    }
+    if (unavailablePanels.length) {
+      warnings.push(
+        `These panels are not available to the account currently previewing this sidebar, so they are preserved but skipped: ${unavailablePanels.join(', ')}.`
+      );
+    }
+
+    this._panelWarnings = warnings;
+    this._invalidConfig = hasBlockingConfigErrors(validation) ? validation : undefined;
+  }
 
   private _refreshProfileDirectory = async (): Promise<void> => {
     const currentUser = this.hass.user;
@@ -1041,6 +1145,7 @@ export class SidebarConfigDialog extends BaseEditor {
     const result = await provider.read();
     if (!result.available || !result.valid || !result.config) {
       this._haConfigErrors = result.errors;
+      this._panelWarnings = [];
       this._sidebarConfig = this._initConfig || {};
       this._baselineConfig = structuredClone(this._sidebarConfig);
       this._configLoaded = true;
@@ -1056,13 +1161,7 @@ export class SidebarConfigDialog extends BaseEditor {
     this._baselineConfig = structuredClone(result.config);
     const validationResult = (await isItemsValid(result.config, this.hass, true)) as INVALID_CONFIG;
     if (typeof validationResult === 'object' && validationResult !== null) {
-      const hasBlockingError = Boolean(
-        validationResult.repeatedItems?.length || validationResult.hasDefaultInGroupsOrBottom
-      );
-      this._invalidConfig = hasBlockingError ? validationResult : undefined;
-      if (!hasBlockingError && (validationResult.invalidItems?.length || validationResult.noTitleItems?.length)) {
-        this._haConfigErrors = ['Some panels are unavailable to this account and will be ignored at runtime.'];
-      }
+      this._applyHomeAssistantPanelValidation(validationResult);
     }
     const currentPanelOrder = JSON.parse(getStorage(STORAGE.PANEL_ORDER) || '[]');
     this._updateSidebarItems(currentPanelOrder, getHiddenPanels());
@@ -1283,8 +1382,10 @@ export class SidebarConfigDialog extends BaseEditor {
     }
 
     const hasConfigChanged = JSON.stringify(this._sidebarConfig) !== JSON.stringify(configToValidate);
+    const centrallyManaged =
+      this._configSource === 'home_assistant_config' || this._configSource === 'home_assistant_profile';
 
-    if (hasConfigChanged) {
+    if (hasConfigChanged && !centrallyManaged) {
       //info
       console.log(
         '%cSIDEBAR-DIALOG:%c ℹ️ Config has changed:',
@@ -1298,6 +1399,10 @@ export class SidebarConfigDialog extends BaseEditor {
       if (this._configSource === 'browser_storage') {
         setStorage(STORAGE.UI_CONFIG, this._sidebarConfig);
       }
+    } else if (hasConfigChanged) {
+      console.info(
+        'Sidebar Organizer kept the Home Assistant configuration unchanged; user-specific hidden/default panels are applied only to this preview.'
+      );
     }
 
     // Filter out defaultPanel and 'lovelace' from the current panel order
@@ -1750,11 +1855,87 @@ export class SidebarConfigDialog extends BaseEditor {
           color: var(--secondary-text-color);
           font-size: 0.9rem;
         }
+        .settings-overview {
+          display: grid;
+          gap: 12px;
+          padding: 4px;
+        }
+        .settings-card {
+          background: var(--card-background-color, var(--mdc-theme-surface));
+          border: 1px solid var(--divider-color);
+          border-radius: 12px;
+          display: grid;
+          gap: 14px;
+          padding: 16px;
+        }
+        .settings-card-heading {
+          align-items: flex-start;
+          display: grid;
+          gap: 12px;
+          grid-template-columns: auto minmax(0, 1fr) auto;
+        }
+        .settings-card-heading ha-icon {
+          color: var(--primary-color);
+          margin-block-start: 2px;
+        }
+        .settings-card h2,
+        .settings-card p {
+          margin: 0;
+        }
+        .settings-card h2 {
+          font-size: 1rem;
+        }
+        .settings-card p,
+        .profile-selector-heading span {
+          color: var(--secondary-text-color);
+          font-size: 0.9rem;
+          line-height: 1.4;
+          margin-block-start: 4px;
+        }
+        .status-badge {
+          background: var(--secondary-background-color);
+          border-radius: 999px;
+          color: var(--secondary-text-color);
+          font-size: 0.75rem;
+          font-weight: 600;
+          padding: 4px 8px;
+        }
+        .status-badge[data-active='true'] {
+          background: color-mix(in srgb, var(--success-color, #43a047) 18%, transparent);
+          color: var(--success-color, #43a047);
+        }
+        .source-summary {
+          background: var(--secondary-background-color);
+          border-radius: 8px;
+          display: grid;
+          gap: 2px;
+          padding: 10px 12px;
+        }
+        .source-summary span {
+          color: var(--secondary-text-color);
+          font-size: 0.8rem;
+        }
+        .technical-details {
+          border-block-start: 1px solid var(--divider-color);
+          padding-block-start: 12px;
+        }
+        .technical-details summary {
+          color: var(--primary-color);
+          cursor: pointer;
+          font-size: 0.9rem;
+          font-weight: 500;
+        }
         .profile-selector,
         .profile-copy-controls {
           display: grid;
           gap: 8px;
-          margin-block-start: var(--side-dialog-gutter);
+        }
+        .profile-selector {
+          border-block-start: 1px solid var(--divider-color);
+          padding-block-start: 12px;
+        }
+        .profile-selector-heading {
+          display: grid;
         }
         .profile-selector > span,
         .profile-copy-controls > span {
@@ -1764,6 +1945,15 @@ export class SidebarConfigDialog extends BaseEditor {
         .profile-copy-controls {
           border-block-start: 1px solid var(--divider-color);
           padding-block-start: var(--side-dialog-gutter);
+        }
+        @media all and (max-width: 520px) {
+          .settings-card-heading {
+            grid-template-columns: auto minmax(0, 1fr);
+          }
+          .status-badge {
+            grid-column: 2;
+            justify-self: start;
+          }
         }
       `,
     ];

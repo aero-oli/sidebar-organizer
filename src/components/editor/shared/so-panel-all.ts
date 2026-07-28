@@ -87,7 +87,7 @@ export class SoPanelAll extends BaseEditor {
         <div class="group-title">
           <div></div>
           <ha-dropdown @wa-select=${this._handleGroupByPanelType}>
-            <ha-button with-caret size="small" slot="trigger" appearance="outline"
+            <ha-button with-caret size="s" slot="trigger" appearance="outline"
               >Display by: ${this._showByGroup ? 'Groups' : 'Type'}</ha-button
             >
             <ha-dropdown-item .value=${'groups'} ?selected=${this._showByGroup}>Groups</ha-dropdown-item>
@@ -122,7 +122,7 @@ export class SoPanelAll extends BaseEditor {
               id: 'new-items',
               header: 'User Created',
               iconSlot: html`<ha-button
-                size="small"
+                size="s"
                 variant="brand"
                 appearance="filled"
                 slot="icons"
@@ -188,7 +188,7 @@ export class SoPanelAll extends BaseEditor {
         .section=${section}
         .groupName=${groupName}
       >
-        <ha-button size="small" variant="neutral" appearance="filled" with-caret slot="trigger">more</ha-button>
+        <ha-button size="s" variant="neutral" appearance="filled" with-caret slot="trigger">more</ha-button>
         ${actionsToShow.map((item) =>
           _renderActionItem({ item, option: { groupName, section, checked: this._dialog._uncategorizedIsActive } })
         )}
@@ -272,7 +272,7 @@ export class SoPanelAll extends BaseEditor {
         <div>${CONFIG_AREA_LABELS[sectionName] ?? sectionName}</div>
         ${headerActionButton
           ? html`<ha-button
-              size="small"
+              size="s"
               variant=${headerActionButton.hightLight ? 'brand' : 'neutral'}
               appearance="plain"
               @click=${headerActionButton.onClick}

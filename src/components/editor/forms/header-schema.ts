@@ -12,26 +12,29 @@ interface BooleanItem<T = string> {
 const BOOLEAN_OPTIONS = [
   {
     name: 'hide_header_toggle',
-    helper: 'Toggle button for collapsing/expanding groups',
+    label: 'Hide expand/collapse button',
+    helper: 'Remove the header button that opens or closes every sidebar group.',
   },
   {
     name: 'animation_off',
-    label: 'Disable Animation',
-    helper: 'Disable slide-in/slide-out animation for group toggling',
+    label: 'Disable group animation',
+    helper: 'Open and close groups immediately instead of animating each panel.',
   },
   {
     name: 'move_settings_from_fixed',
-    helper: 'Move the Settings item from the fixed panels to be user-configurable',
+    label: 'Make Settings movable',
+    helper: 'Allow Settings to be placed in a group instead of always staying fixed at the bottom.',
     default: false,
   },
   {
     name: 'force_transparent_background',
-    helper: 'Force apply transparent background (fully transparent)',
+    label: 'Transparent sidebar background',
+    helper: 'Let the dashboard background show through the sidebar.',
   },
   {
     name: 'accordion_mode',
-    label: 'Accordion Mode',
-    helper: 'Only one group can be open at a time',
+    label: 'Keep only one group open',
+    helper: 'Opening a group automatically closes the other groups.',
   },
 ];
 
@@ -70,6 +73,8 @@ export const BASE_APPEARANCE_SCHEMA = memoizeOne((data: SidebarAppearanceConfig)
           schema: [
             {
               name: 'header_title',
+              label: 'Sidebar title',
+              helper: 'Text shown at the top of the sidebar.',
               type: 'string',
             },
             ...commonBooleanSchema(['hide_header_toggle', 'animation_off']),
@@ -87,7 +92,7 @@ export const BASE_APPEARANCE_SCHEMA = memoizeOne((data: SidebarAppearanceConfig)
                         unit_of_measurement: 'ms',
                       },
                     },
-                    helper: 'Delay for each item (default: 50ms)',
+                    helper: 'Time between each panel appearing when a group opens. Lower is faster.',
                     default: 50,
                     disabled: delayDisabled,
                   },
@@ -98,7 +103,7 @@ export const BASE_APPEARANCE_SCHEMA = memoizeOne((data: SidebarAppearanceConfig)
               name: 'text_transformation',
               label: 'Text Transformation',
               default: 'capitalize',
-              helper: 'Transform the text of group names',
+              helper: 'Choose how group names are capitalized.',
               selector: {
                 select: {
                   mode: 'dropdown',
@@ -115,7 +120,7 @@ export const BASE_APPEARANCE_SCHEMA = memoizeOne((data: SidebarAppearanceConfig)
               name: 'width',
               label: 'Custom Width',
               helper:
-                'Set a custom width for the sidebar, allows values with css units (e.g., 300px or 20%), or a number (which will be treated as pixels)',
+                'Optional sidebar width, for example 300px or 20%. Leave blank to use Home Assistant’s default.',
               type: 'string',
             },
           ] as const,

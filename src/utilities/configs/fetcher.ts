@@ -6,7 +6,14 @@ import { HomeAssistantConfigProvider } from '../../config/providers/ha-config-pr
 import { HomeAssistantProfileProvider } from '../../config/providers/ha-profile-provider';
 import { resolvePreferredConfigSource } from '../../config/source';
 import { getConfigSource, getStorage, getStorageConfig, setConfigSource, setStorage } from '../storage-utils';
-import { _changeStorageConfig, isItemsValid, tryCorrectConfig, validateConfig } from './validators';
+import {
+  _changeStorageConfig,
+  hasBlockingConfigErrors,
+  INVALID_CONFIG,
+  isItemsValid,
+  tryCorrectConfig,
+  validateConfig,
+} from './validators';
 
 const randomId = (): string => Math.random().toString(16).slice(2);
 
@@ -39,9 +46,31 @@ export const fetchConfig = async (hass: HaExtened['hass']): Promise<SidebarConfi
   if (config) {
     config = { ...config };
     // console.log('Added with init config defaults', config);
-    const isValid = await isItemsValid(config, hass, true).then((result) =>
-      typeof result === 'boolean' ? result : result.valid
-    );
+    const validation = await isItemsValid(config, hass, true);
+    const isValid = typeof validation === 'boolean' ? validation : validation.valid;
+    const hasBlockingErrors =
+      typeof validation === 'object' && hasBlockingConfigErrors(validation as INVALID_CONFIG);
+
+    if (source === 'home_assistant_config' || source === 'home_assistant_profile') {
+      if (hasBlockingErrors) {
+        const cachedConfig = getHaConfigCache();
+        if (cachedConfig) {
+          console.warn(`${CONFIG_NAME}: duplicate panel assignments found. Using the last successful cache.`);
+          return cachedConfig;
+        }
+        console.warn(`${CONFIG_NAME}: duplicate panel assignments found. Using the default configuration.`);
+        return DEFAULT_CONFIG;
+      }
+
+      if (!isValid) {
+        console.warn(
+          `${CONFIG_NAME}: some panels differ for this user; the Home Assistant configuration is still being used.`
+        );
+      }
+      const effectiveConfig = validateConfig(config, []);
+      setStorage(STORAGE.HA_CONFIG_CACHE, effectiveConfig);
+      return effectiveConfig;
+    }
 
     if (!isValid && source === 'browser_storage') {
       console.log('Config is not valid. Trying to correct it.');
@@ -52,26 +81,9 @@ export const fetchConfig = async (hass: HaExtened['hass']): Promise<SidebarConfi
     } else if (!isValid && source === 'static_yaml') {
       config = DEFAULT_CONFIG;
       return config;
-    } else if (!isValid && source === 'home_assistant_profile') {
-      // A profile can be authored by an administrator who sees panels the target
-      // user cannot. Keep those ids in the profile and ignore them at runtime.
-      console.warn(`${CONFIG_NAME}: profile contains panels unavailable to the current user; ignoring them.`);
-      setStorage(STORAGE.HA_CONFIG_CACHE, config);
-      return config;
-    } else if (!isValid && source === 'home_assistant_config') {
-      const cachedConfig = getHaConfigCache();
-      if (cachedConfig) {
-        console.warn(`${CONFIG_NAME}: backend config is invalid. Using last successful backend config cache.`);
-        return cachedConfig;
-      }
-      config = DEFAULT_CONFIG;
-      return config;
     } else {
       config = validateConfig(config);
       _changeStorageConfig(config);
-      if (source === 'home_assistant_config' || source === 'home_assistant_profile') {
-        setStorage(STORAGE.HA_CONFIG_CACHE, config);
-      }
     }
   }
   if (!config) {

@@ -66,7 +66,7 @@ export const CONFIG_AREA_LABELS: Record<PanelAreaType | ConfigSectionType | stri
 export const CONFIG_SECTIONS_MENU: Record<ConfigSectionType | string, { label: string; description: string }> = {
   [CONFIG_SECTION.GENERAL]: {
     label: CONFIG_AREA_LABELS[CONFIG_SECTION.GENERAL],
-    description: 'General settings for the sidebar.',
+    description: 'Choose what to customize and see where each user’s sidebar is saved.',
   },
   [CONFIG_SECTION.APPEARANCE]: {
     label: CONFIG_AREA_LABELS[CONFIG_SECTION.APPEARANCE],

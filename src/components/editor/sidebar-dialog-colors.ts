@@ -320,7 +320,7 @@ export class SidebarDialogColors extends BaseEditor {
       </div>
       <ha-button
         appearance="plain"
-        size="small"
+        size="s"
         variant="warning"
         .disabled=${!hasChanged}
         @click=${() => this._resetColorConfig('currentMode')}
@@ -329,11 +329,11 @@ export class SidebarDialogColors extends BaseEditor {
     </div> `;
 
     const pickerActive = html` <div class="header-row">
-      <ha-button appearance="plain" size="small" variant="warning" @click=${() => this._picker?.color.reset()}
+      <ha-button appearance="plain" size="s" variant="warning" @click=${() => this._picker?.color.reset()}
         >Reset</ha-button
       >
-      <ha-button appearance="plain" size="small" @click=${() => this._handleColorPicker('cancel')}>Cancel</ha-button>
-      <ha-button appearance="outlined" size="small" @click=${() => this._handleColorPicker('save')}>Save</ha-button>
+      <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('cancel')}>Cancel</ha-button>
+      <ha-button appearance="outlined" size="s" @click=${() => this._handleColorPicker('save')}>Save</ha-button>
     </div>`;
 
     const colorConfigContent = html`
@@ -500,10 +500,10 @@ export class SidebarDialogColors extends BaseEditor {
           })}
           ${this._currentConfigValue === configValue
             ? html` <div class="change-format">
-                <ha-button appearance="plain" size="small" @click=${() => this._handleColorPicker('hex')}
+                <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('hex')}
                   >HEX</ha-button
                 >
-                <ha-button appearance="plain" size="small" @click=${() => this._handleColorPicker('rgb')}
+                <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('rgb')}
                   >RGBA</ha-button
                 >
               </div>`
@@ -547,7 +547,7 @@ export class SidebarDialogColors extends BaseEditor {
         ${createHaForm(this, schema, modeStyleData, { configKey: 'custom_styles' })}
         <ha-button
           appearance="plain"
-          size="small"
+          size="s"
           slot="extra-actions"
           .disabled=${!hasCustomStyles}
           style="float: inline-end;"
