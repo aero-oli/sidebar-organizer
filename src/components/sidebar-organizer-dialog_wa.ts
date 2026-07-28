@@ -309,7 +309,10 @@ export class SidebarOrganizerDialogWA extends LitElement implements HassDialog<S
           }
         }
         .content {
+          --so-dialog-content-height: calc(var(--mdc-dialog-min-height, 700px) - 128px);
           box-sizing: border-box;
+          height: var(--so-dialog-content-height);
+          max-height: var(--so-dialog-content-height);
           min-height: 0;
           overflow-y: auto;
           overscroll-behavior-y: contain;

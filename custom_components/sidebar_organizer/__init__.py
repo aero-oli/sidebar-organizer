@@ -28,6 +28,7 @@ from .const import (
     DOMAIN,
     FRONTEND_JS,
     FRONTEND_URL_BASE,
+    FRONTEND_URL_KEY,
     FRONTEND_VERSION,
     PROFILE_LOCK,
     PROFILE_SUBSCRIBERS,
@@ -35,6 +36,7 @@ from .const import (
 from .helpers import (
     DEFAULT_CONFIG_YAML,
     atomic_write_text,
+    file_revision,
     frontend_module_url,
     normalize_options,
     resolve_config_path,
@@ -152,4 +154,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     await hass.http.async_register_static_paths(
         [StaticPathConfig(FRONTEND_URL_BASE, str(frontend_dir), True)]
     )
-    frontend.add_extra_js_url(hass, frontend_module_url(FRONTEND_VERSION))
+    frontend_revision = await hass.async_add_executor_job(file_revision, frontend_file)
+    module_url = frontend_module_url(f"{FRONTEND_VERSION}-{frontend_revision[:12]}")
+    hass.data[FRONTEND_URL_KEY] = module_url
+    frontend.add_extra_js_url(hass, module_url)

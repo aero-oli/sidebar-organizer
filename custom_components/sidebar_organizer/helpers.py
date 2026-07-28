@@ -192,8 +192,13 @@ def file_metadata(path: Path) -> dict[str, Any]:
         "exists": True,
         "last_modified": stat.st_mtime,
         "size": stat.st_size,
-        "revision": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "revision": file_revision(path),
     }
+
+
+def file_revision(path: Path) -> str:
+    """Return a content digest suitable for revisions and cache keys."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def frontend_module_url(version: str) -> str:

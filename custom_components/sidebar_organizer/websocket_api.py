@@ -16,6 +16,7 @@ from .const import (
     CONF_CREATE_IF_MISSING,
     CONF_PROFILES_PATH,
     DOMAIN,
+    FRONTEND_URL_KEY,
     FRONTEND_VERSION,
     PROFILE_LOCK,
     PROFILE_SUBSCRIBERS,
@@ -76,7 +77,9 @@ def websocket_diagnostics(
         {
             **_metadata(hass),
             "backend_loaded": True,
-            "frontend_url": frontend_module_url(FRONTEND_VERSION),
+            "frontend_url": hass.data.get(
+                FRONTEND_URL_KEY, frontend_module_url(FRONTEND_VERSION)
+            ),
             "legacy_resource_hint": "/hacsfiles/sidebar-organizer/sidebar-organizer.js",
         },
     )

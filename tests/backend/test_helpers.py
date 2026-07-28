@@ -18,6 +18,7 @@ atomic_write_text = helpers.atomic_write_text
 resolve_config_path = helpers.resolve_config_path
 validate_yaml_config = helpers.validate_yaml_config
 frontend_module_url = helpers.frontend_module_url
+file_revision = helpers.file_revision
 file_metadata = getattr(helpers, "file_metadata", None)
 normalize_options = getattr(helpers, "normalize_options", None)
 profile_path = getattr(helpers, "profile_path", None)
@@ -132,6 +133,16 @@ default_collapsed: {}
             frontend_module_url("4.1.1"),
             "/sidebar_organizer/frontend/sidebar-organizer.js?v=4.1.1",
         )
+
+    def test_file_revision_changes_with_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "sidebar-organizer.js"
+            path.write_text("first", encoding="utf-8")
+            first = file_revision(path)
+            path.write_text("second", encoding="utf-8")
+
+            self.assertNotEqual(first, file_revision(path))
+            self.assertEqual(len(first), 64)
 
     def test_file_metadata_reports_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
