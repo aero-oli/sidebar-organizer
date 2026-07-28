@@ -104,6 +104,7 @@ export class SidebarConfigDialog extends BaseEditor {
 
   private _haConfigPollTimer?: number;
   private _profileUnsubscribe?: () => void;
+  private _resizeMeasureTimer?: number;
   private _resizeObserver?: ResizeObserver;
   private _baselineConfig: SidebarConfig = {};
 
@@ -140,6 +141,8 @@ export class SidebarConfigDialog extends BaseEditor {
       this._resizeObserver.disconnect();
       this._resizeObserver = undefined;
     }
+    window.clearTimeout(this._resizeMeasureTimer);
+    this._resizeMeasureTimer = undefined;
     window.clearInterval(this._haConfigPollTimer);
     this._haConfigPollTimer = undefined;
     this._profileUnsubscribe?.();
@@ -270,7 +273,10 @@ export class SidebarConfigDialog extends BaseEditor {
       }
     }
     if (_changedProperties.has('_configLoaded') && this._configLoaded === true && !this._resizeObserver) {
-      setTimeout(() => {
+      window.clearTimeout(this._resizeMeasureTimer);
+      this._resizeMeasureTimer = window.setTimeout(() => {
+        this._resizeMeasureTimer = undefined;
+        if (!this.isConnected) return;
         this._measureConfigSection();
       }, 100);
     }
@@ -394,17 +400,22 @@ export class SidebarConfigDialog extends BaseEditor {
   };
 
   private _measureConfigSection() {
+    if (!this.isConnected || this._resizeObserver) return;
     const configSection = this.shadowRoot?.getElementById('sidebar-config');
     if (!configSection) return;
     this._resizeObserver = new ResizeObserver((entries) => {
+      if (!this.isConnected) return;
+      const dialogPreview = this.shadowRoot?.querySelector<ELEMENT.SidebarDialogPreview>(DIALOG_TAG.PREVIEW);
+      if (!dialogPreview) return;
+
       for (const entry of entries) {
         const { height, width } = entry.contentRect;
         this._narrow = width < 600;
         const minHeight = 800;
         if (height > minHeight && !this.fullscreen) {
-          this._dialogPreview.style.setProperty('--config-section-height', `${Math.round(height)}px`);
+          dialogPreview.style.setProperty('--config-section-height', `${Math.round(height)}px`);
         } else {
-          this._dialogPreview.style.removeProperty('--config-section-height');
+          dialogPreview.style.removeProperty('--config-section-height');
         }
       }
     });
