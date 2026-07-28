@@ -34,6 +34,7 @@ export enum STORAGE {
   CONFIG_SOURCE = 'sidebarOrganizerConfigSource',
   HA_CONFIG_CACHE = 'sidebarOrganizerHaConfigCache',
   HA_CONFIG_LAST_MODIFIED = 'sidebarOrganizerHaConfigLastModified',
+  HA_CONFIG_REVISION = 'sidebarOrganizerHaConfigRevision',
   PANEL_ORDER = 'sidebarPanelOrder',
   COLLAPSE = 'sidebarCollapsedGroups',
   HIDDEN_PANELS = 'sidebarHiddenPanels',

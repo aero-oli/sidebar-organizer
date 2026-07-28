@@ -18,3 +18,10 @@ Known fields:
 - `pinned_groups`: object
 
 Invalid YAML must never crash Home Assistant or the frontend.
+
+The same schema is used by the shared file and every personal profile. With the default paths these are:
+
+- `/config/sidebar-organizer.yaml`
+- `/config/sidebar-organizer-profiles/<home-assistant-user-id>.yaml`
+
+Profiles are complete configurations rather than partial overlays. A missing personal profile inherits the shared file in full. Unknown panel IDs are preserved because an administrator may author a profile containing panels unavailable to their own account; unavailable panels are ignored for the target user at runtime.

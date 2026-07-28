@@ -10,19 +10,27 @@ from homeassistant.core import callback
 
 from .const import (
     CONF_ALLOW_WRITE,
+    CONF_ALLOW_USER_WRITE,
     CONF_CONFIG_PATH,
     CONF_CREATE_IF_MISSING,
+    CONF_PROFILES_PATH,
     DOMAIN,
 )
-from .helpers import normalize_options, resolve_config_path
+from .helpers import normalize_options, resolve_config_path, resolve_profiles_path
 
 
 def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
     return vol.Schema(
         {
             vol.Required(CONF_CONFIG_PATH, default=defaults[CONF_CONFIG_PATH]): str,
+            vol.Required(CONF_PROFILES_PATH, default=defaults[CONF_PROFILES_PATH]): str,
             vol.Required(CONF_ALLOW_WRITE, default=defaults[CONF_ALLOW_WRITE]): bool,
-            vol.Required(CONF_CREATE_IF_MISSING, default=defaults[CONF_CREATE_IF_MISSING]): bool,
+            vol.Required(
+                CONF_ALLOW_USER_WRITE, default=defaults[CONF_ALLOW_USER_WRITE]
+            ): bool,
+            vol.Required(
+                CONF_CREATE_IF_MISSING, default=defaults[CONF_CREATE_IF_MISSING]
+            ): bool,
         }
     )
 
@@ -42,7 +50,12 @@ class SidebarOrganizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                resolve_config_path(self.hass.config.path(), user_input[CONF_CONFIG_PATH])
+                resolve_config_path(
+                    self.hass.config.path(), user_input[CONF_CONFIG_PATH]
+                )
+                resolve_profiles_path(
+                    self.hass.config.path(), user_input[CONF_PROFILES_PATH]
+                )
             except ValueError:
                 errors["base"] = "invalid_path"
             else:
@@ -85,11 +98,18 @@ class SidebarOrganizerOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             try:
-                resolve_config_path(self.hass.config.path(), user_input[CONF_CONFIG_PATH])
+                resolve_config_path(
+                    self.hass.config.path(), user_input[CONF_CONFIG_PATH]
+                )
+                resolve_profiles_path(
+                    self.hass.config.path(), user_input[CONF_PROFILES_PATH]
+                )
             except ValueError:
                 errors["base"] = "invalid_path"
             else:
-                return self.async_create_entry(title="", data=normalize_options(user_input))
+                return self.async_create_entry(
+                    title="", data=normalize_options(user_input)
+                )
 
         return self.async_show_form(
             step_id="init",

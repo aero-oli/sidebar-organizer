@@ -3,10 +3,17 @@ import { describe, it } from 'node:test';
 
 import { isHaConfigModified } from '../../src/config/ha-config-refresh';
 import { HomeAssistantConfigProvider } from '../../src/config/providers/ha-config-provider';
+import { HomeAssistantProfileProvider } from '../../src/config/providers/ha-profile-provider';
 import { resolvePreferredConfigSource } from '../../src/config/source';
 import { parseSidebarYamlConfig } from '../../src/config/validation';
 import { defineCustomElementSafely } from '../../src/utilities/safe-custom-element';
 import { claimSidebarOrganizerModuleLoad } from '../../src/utilities/module-load-guard';
+import {
+  getScopedStorageKey,
+  getStorage,
+  setActiveStorageUser,
+  setStorage,
+} from '../../src/utilities/storage-utils';
 
 describe('parseSidebarYamlConfig', () => {
   it('parses and normalizes valid sidebar YAML', () => {
@@ -156,6 +163,9 @@ describe('resolvePreferredConfigSource', () => {
     const source = await resolvePreferredConfigSource(
       {
         callWS: async (message: Record<string, unknown>) => {
+          if (message.type === 'sidebar_organizer/profile/info') {
+            return { available: true, profile_exists: false };
+          }
           assert.equal(message.type, 'sidebar_organizer/config/info');
           return { available: true, allow_write: true };
         },
@@ -177,6 +187,99 @@ describe('resolvePreferredConfigSource', () => {
     );
 
     assert.equal(source, 'static_yaml');
+  });
+
+  it('prefers a personal Home Assistant profile when one exists', async () => {
+    const source = await resolvePreferredConfigSource(
+      {
+        callWS: async (message: Record<string, unknown>) => {
+          assert.equal(message.type, 'sidebar_organizer/profile/info');
+          return { available: true, profile_exists: true };
+        },
+      } as never,
+      'home_assistant_config'
+    );
+
+    assert.equal(source, 'home_assistant_profile');
+  });
+});
+
+describe('HomeAssistantProfileProvider', () => {
+  it('scopes profile requests to the selected Home Assistant user', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const provider = new HomeAssistantProfileProvider(
+      {
+        callWS: async (message: Record<string, unknown>) => {
+          calls.push(message);
+          if (message.type === 'sidebar_organizer/profile/read') {
+            return {
+              available: true,
+              profile_exists: true,
+              revision: 'one',
+              yaml: 'bottom_items: []',
+              valid: true,
+            };
+          }
+          return { available: true, profile_exists: true, revision: 'two' };
+        },
+      },
+      'target-user'
+    );
+
+    assert.equal((await provider.read()).config?.bottom_items?.length, 0);
+    await provider.write('bottom_items: []', 'one');
+    await provider.delete('two');
+    await provider.copy('shared', 'target-user', 'two');
+
+    assert.deepEqual(
+      calls.map((call) => [call.type, call.user_id]),
+      [
+        ['sidebar_organizer/profile/read', 'target-user'],
+        ['sidebar_organizer/profile/write', 'target-user'],
+        ['sidebar_organizer/profile/delete', 'target-user'],
+        ['sidebar_organizer/profile/copy', undefined],
+      ]
+    );
+    assert.equal(calls[1].expected_revision, 'one');
+    assert.equal(calls[3].source, 'shared');
+    assert.equal(calls[3].target_user_id, 'target-user');
+  });
+});
+
+describe('user-scoped browser storage', () => {
+  it('isolates values and migrates an existing unscoped value once', () => {
+    const values = new Map<string, string>([['sidebarOrganizerConfig', '{"legacy":true}']]);
+    const previousWindow = globalThis.window;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem: (key: string) => values.get(key) ?? null,
+          setItem: (key: string, value: string) => values.set(key, value),
+          removeItem: (key: string) => values.delete(key),
+        },
+      },
+    });
+
+    try {
+      setActiveStorageUser('user-one');
+      assert.equal(getStorage('sidebarOrganizerConfig'), '{"legacy":true}');
+      assert.equal(values.get('sidebarOrganizerConfig:user-one'), '{"legacy":true}');
+      setStorage('sidebarOrganizerConfig', { personal: 1 });
+
+      setActiveStorageUser('user-two');
+      assert.equal(getScopedStorageKey('sidebarOrganizerConfig'), 'sidebarOrganizerConfig:user-two');
+      assert.equal(getStorage('sidebarOrganizerConfig'), null);
+      setStorage('sidebarOrganizerConfig', { personal: 2 });
+
+      assert.notEqual(
+        values.get('sidebarOrganizerConfig:user-one'),
+        values.get('sidebarOrganizerConfig:user-two')
+      );
+    } finally {
+      setActiveStorageUser(undefined);
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+    }
   });
 });
 

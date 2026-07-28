@@ -2,7 +2,7 @@ import { ALERT_MSG, STORAGE } from '@constants';
 import { PinnedGroupsConfig, SidebarConfig } from '@types';
 import { getFallbackIcon } from '@utilities/is-icon';
 
-import { getStorage, setStorage } from '../storage-utils';
+import { getStorage, removeStorage, setStorage } from '../storage-utils';
 
 export const getCollapsedItems = (
   customGroups: SidebarConfig['custom_groups'] = {},
@@ -24,7 +24,7 @@ export const getCollapsedItems = (
 };
 
 export const isBeforeChange = (): boolean => {
-  const version = localStorage.getItem(STORAGE.HA_VERSION) || '';
+  const version = getStorage(STORAGE.HA_VERSION) || '';
   const [year, major, patch] = version.split('.').map(Number); //eslint-disable-line
   let isBefore = false;
 
@@ -52,7 +52,7 @@ export function clearSidebarOrganizerStorage(): void {
   const resetConfigPromise = async () => {
     new Promise<void>((resolve) => {
       [STORAGE.UI_CONFIG, STORAGE.PANEL_ORDER, STORAGE.COLLAPSE, STORAGE.HIDDEN_PANELS].forEach((key) => {
-        window.localStorage.removeItem(key);
+        removeStorage(key);
       });
       resolve();
     });

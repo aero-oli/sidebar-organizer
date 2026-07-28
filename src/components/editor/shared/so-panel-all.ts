@@ -21,6 +21,7 @@ import { _renderActionItem, ActionType, computeActionList } from '@utilities/act
 import { createExpansionPanel, ExpandablePanelProps, isMobile, stopPropagation } from '@utilities/dom-utils.js';
 import { fireEvent } from '@utilities/fire_event';
 import { safeCustomElement } from '@utilities/safe-custom-element';
+import { getStorage, setStorage } from '@utilities/storage-utils';
 import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, TemplateResult, css, nothing, PropertyValues } from 'lit';
 import { property, queryAll } from 'lit/decorators.js';
@@ -68,7 +69,7 @@ export class SoPanelAll extends BaseEditor {
 
   public connectedCallback(): void {
     super.connectedCallback();
-    this._showByGroup = window.localStorage.getItem(STORAGE.SHOW_BY_GROUP) === 'true';
+    this._showByGroup = getStorage(STORAGE.SHOW_BY_GROUP) === 'true';
   }
 
   protected updated(changedProps: PropertyValues): void {
@@ -364,7 +365,7 @@ export class SoPanelAll extends BaseEditor {
     }
     const value = (ev.detail as any).item.value;
     this._showByGroup = value === 'groups';
-    window.localStorage.setItem(STORAGE.SHOW_BY_GROUP, String(this._showByGroup));
+    setStorage(STORAGE.SHOW_BY_GROUP, this._showByGroup);
   }
 
   static get styles() {

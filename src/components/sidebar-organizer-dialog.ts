@@ -75,7 +75,7 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
   }
 
   private get _canSaveConfig(): boolean {
-    return (
+    return this._configDialog.canWriteCurrentSource && (
       this._configDialog._invalidConfig === undefined ||
       (this._configValid && Object.keys(this._configDialog._sidebarConfig).length !== 0)
     );
@@ -86,7 +86,7 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
       // If using config file, we don't check for changes
       return false;
     }
-    return JSON.stringify(this._initConfig) !== JSON.stringify(this._configDialog._sidebarConfig);
+    return this._configDialog.hasUnsavedChanges;
   }
 
   private async _handleClose() {
@@ -133,6 +133,9 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
     } else if (this._configDialog._configSource === 'home_assistant_config' && this._configValid) {
       const saved = await this._configDialog._saveHomeAssistantConfig();
       if (!saved) return;
+    } else if (this._configDialog._configSource === 'home_assistant_profile' && this._configValid) {
+      const saved = await this._configDialog._saveHomeAssistantProfile();
+      if (!saved) return;
     }
     const config = this._configDialog!._sidebarConfig;
     const useConfigFile = this._configDialog!._useConfigFile;
@@ -140,6 +143,7 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
     const detail = {
       config,
       configSource,
+      profileUserId: this._configDialog.selectedProfileUserId,
       useConfigFile: useConfigFile,
     };
     fireEvent(this, HA_EVENT.SIDEBAR_CONFIG_SAVED, detail);
@@ -306,7 +310,12 @@ declare global {
     'sidebar-organizer-dialog': SidebarOrganizerDialog;
   }
   interface HASSDomEvents {
-    'save-sidebar-organizer-config': { config: SidebarConfig; configSource?: ConfigSource; useConfigFile: boolean };
+    'save-sidebar-organizer-config': {
+      config: SidebarConfig;
+      configSource?: ConfigSource;
+      profileUserId?: string;
+      useConfigFile: boolean;
+    };
   }
   interface Window {
     _sidebarOrganizerDialog?: SidebarOrganizerDialog;

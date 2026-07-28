@@ -54,7 +54,14 @@ import {
   getDefaultPanelUrlPath,
   createHaTooltipForItem,
 } from '@utilities/panel';
-import { getConfigSource, setStorage } from '@utilities/storage-utils';
+import {
+  getConfigSource,
+  getScopedStorageKey,
+  getStorage,
+  removeStorage,
+  setActiveStorageUser,
+  setStorage,
+} from '@utilities/storage-utils';
 import { hasTemplate, subscribeRenderTemplate } from '@utilities/ws-templates';
 import { getPromisableResult, PromisableOptions } from 'get-promisable-result';
 import { HAElement, HAQuerySelector, HAQuerySelectorEvent, OnListenDetail } from 'home-assistant-query-selector';
@@ -63,6 +70,7 @@ import { HomeAssistantStylesManager } from 'home-assistant-styles-manager';
 import { SoGroupDivider } from './components/so-group-divider';
 import { isHaConfigModified, parseStoredLastModified } from './config/ha-config-refresh';
 import { HomeAssistantConfigProvider } from './config/providers/ha-config-provider';
+import { HomeAssistantProfileProvider } from './config/providers/ha-profile-provider';
 import { DIVIDER_ADDED_STYLE, DRAWER_STYLE, HA_MAIN_CUSTOM_WIDTH_STYLE, HUI_ROOT_STYLE } from './sidebar-css';
 
 export class SidebarOrganizer {
@@ -71,6 +79,7 @@ export class SidebarOrganizer {
     instance.addEventListener(HAQuerySelectorEvent.ON_LISTEN, async (event) => {
       const { HOME_ASSISTANT, HA_DRAWER, HA_SIDEBAR } = event.detail;
       this._ha = (await HOME_ASSISTANT.element) as HaExtened;
+      setActiveStorageUser(this.hass.user?.id);
       this._haDrawer = (await HA_DRAWER.element) as HaDrawer;
       this.HaSidebar = await HA_SIDEBAR.element;
       this.sideBarRoot = (await HA_SIDEBAR.selector.$.element) as ShadowRoot;
@@ -162,6 +171,8 @@ export class SidebarOrganizer {
 
   private _sidebarObserver: MutationObserver;
   private _haConfigRefreshInterval?: number;
+  private _profileUnsubscribe?: () => void;
+  private _activePersonalProfile = false;
 
   get hass(): HaExtened['hass'] {
     return this._ha!.hass;
@@ -185,7 +196,7 @@ export class SidebarOrganizer {
   }
 
   get _hasSidebarConfig(): boolean {
-    const sidebarConfig = localStorage.getItem(STORAGE.UI_CONFIG);
+    const sidebarConfig = getStorage(STORAGE.UI_CONFIG);
     const source = getConfigSource();
     return source !== 'browser_storage' || (sidebarConfig !== null && sidebarConfig !== undefined);
   }
@@ -210,7 +221,14 @@ export class SidebarOrganizer {
     }
 
     compareHacsTagDiff(this._ha.hass);
+    const profileProvider = new HomeAssistantProfileProvider(this.hass);
+    const profileInfo = await profileProvider.info();
+    this._activePersonalProfile = Boolean(profileInfo.available && profileInfo.profile_exists);
+    if (profileInfo.available && !this._profileUnsubscribe) {
+      this._profileUnsubscribe = await profileProvider.subscribe(this._handleProfileChanged);
+    }
     await this._checkUserSidebarSettings();
+    if (this._activePersonalProfile) this._userHasSidebarSettings = false;
     await this._watchEditLegacySidebar();
 
     this._setupConfigBtn();
@@ -370,12 +388,35 @@ export class SidebarOrganizer {
   }
 
   private _watchHaConfigRefresh(): void {
-    if (this._haConfigRefreshInterval !== undefined || getConfigSource() !== 'home_assistant_config') return;
+    const source = getConfigSource();
+    if (
+      this._haConfigRefreshInterval !== undefined ||
+      (source !== 'home_assistant_config' && source !== 'home_assistant_profile')
+    )
+      return;
 
     window.addEventListener('focus', this._checkHaConfigRefresh);
     document.addEventListener('visibilitychange', this._handleVisibilityHaConfigRefresh);
     this._haConfigRefreshInterval = window.setInterval(this._checkHaConfigRefresh, 30 * 1000);
+    if (source === 'home_assistant_profile' && !this._profileUnsubscribe) {
+      new HomeAssistantProfileProvider(this.hass).subscribe(this._handleProfileChanged).then((unsubscribe) => {
+        this._profileUnsubscribe = unsubscribe;
+      });
+    }
   }
+
+  private _handleProfileChanged = (info: { profile_exists?: boolean; revision?: string | null }): void => {
+    if (Boolean(info.profile_exists) !== this._activePersonalProfile) {
+      this._reloadWindow();
+      return;
+    }
+    if (!info.revision) return;
+    const currentRevision = getStorage(STORAGE.HA_CONFIG_REVISION);
+    const parsedRevision = currentRevision ? JSON.parse(currentRevision) : undefined;
+    if (parsedRevision === info.revision) return;
+    setStorage(STORAGE.HA_CONFIG_REVISION, info.revision);
+    this._reloadWindow();
+  };
 
   private _handleVisibilityHaConfigRefresh = (): void => {
     if (document.visibilityState === 'visible') {
@@ -384,13 +425,30 @@ export class SidebarOrganizer {
   };
 
   private _checkHaConfigRefresh = async (): Promise<void> => {
-    if (getConfigSource() !== 'home_assistant_config' || !this.hass) return;
+    const source = getConfigSource();
+    if ((source !== 'home_assistant_config' && source !== 'home_assistant_profile') || !this.hass) return;
+
+    if (source === 'home_assistant_profile') {
+      const info = await new HomeAssistantProfileProvider(this.hass).info();
+      if (!info.available || !info.revision) return;
+      const storedRevisionValue = getStorage(STORAGE.HA_CONFIG_REVISION);
+      const storedRevision = storedRevisionValue ? JSON.parse(storedRevisionValue) : undefined;
+      if (storedRevision === undefined) {
+        setStorage(STORAGE.HA_CONFIG_REVISION, info.revision);
+        return;
+      }
+      if (storedRevision !== info.revision) {
+        setStorage(STORAGE.HA_CONFIG_REVISION, info.revision);
+        this._reloadWindow();
+      }
+      return;
+    }
 
     const provider = new HomeAssistantConfigProvider(this.hass);
     const info = await provider.info();
     if (!info.available || info.last_modified == null) return;
 
-    const storedLastModified = parseStoredLastModified(localStorage.getItem(STORAGE.HA_CONFIG_LAST_MODIFIED));
+    const storedLastModified = parseStoredLastModified(getStorage(STORAGE.HA_CONFIG_LAST_MODIFIED));
     if (storedLastModified === undefined) {
       setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, info.last_modified);
       return;
@@ -505,7 +563,7 @@ export class SidebarOrganizer {
   }
 
   private _storageListener(event: StorageEvent) {
-    if (event.key === STORAGE.COLLAPSE) {
+    if (event.key === getScopedStorageKey(STORAGE.COLLAPSE)) {
       const collapsedItems = JSON.parse(event.newValue!);
       this.collapsedItems = new Set(collapsedItems);
       this._handleCollapsed(this.collapsedItems);
@@ -547,7 +605,7 @@ export class SidebarOrganizer {
         break;
       case HA_EVENT.SIDEBAR_CONFIG_SAVED:
         console.log('Sidebar Config Saved Event:', detail);
-        this._handleNewConfig(detail.config, detail.useConfigFile, detail.configSource);
+        this._handleNewConfig(detail.config, detail.useConfigFile, detail.configSource, detail.profileUserId);
         break;
     }
   }
@@ -1065,8 +1123,25 @@ export class SidebarOrganizer {
     return contentDiv;
   };
 
-  private _handleNewConfig(config: SidebarConfig, useConfigFile: boolean, configSource?: ConfigSource) {
-    if (useConfigFile || configSource === 'home_assistant_config') {
+  private _handleNewConfig(
+    config: SidebarConfig,
+    useConfigFile: boolean,
+    configSource?: ConfigSource,
+    profileUserId?: string
+  ) {
+    if (
+      configSource === 'home_assistant_profile' &&
+      profileUserId !== undefined &&
+      profileUserId !== this.hass.user?.id
+    ) {
+      console.log('Saved another user profile; current sidebar does not need to reload.');
+      return;
+    }
+    if (
+      useConfigFile ||
+      configSource === 'home_assistant_config' ||
+      configSource === 'home_assistant_profile'
+    ) {
       console.log('Using shared config source');
       this._reloadWindow();
       return;
@@ -1082,8 +1157,8 @@ export class SidebarOrganizer {
       const resetConfigPromise = () =>
         new Promise<void>((resolve) => {
           setStorage(STORAGE.UI_CONFIG, this._config);
-          localStorage.removeItem(STORAGE.PANEL_ORDER);
-          localStorage.removeItem(STORAGE.HIDDEN_PANELS);
+          removeStorage(STORAGE.PANEL_ORDER);
+          removeStorage(STORAGE.HIDDEN_PANELS);
           resolve();
         });
       resetConfigPromise().then(() => {

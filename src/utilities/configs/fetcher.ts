@@ -3,8 +3,9 @@ import { HaExtened, SidebarConfig } from '@types';
 import YAML from 'yaml';
 
 import { HomeAssistantConfigProvider } from '../../config/providers/ha-config-provider';
+import { HomeAssistantProfileProvider } from '../../config/providers/ha-profile-provider';
 import { resolvePreferredConfigSource } from '../../config/source';
-import { getConfigSource, getStorageConfig, setConfigSource, setStorage } from '../storage-utils';
+import { getConfigSource, getStorage, getStorageConfig, setConfigSource, setStorage } from '../storage-utils';
 import { _changeStorageConfig, isItemsValid, tryCorrectConfig, validateConfig } from './validators';
 
 const randomId = (): string => Math.random().toString(16).slice(2);
@@ -28,7 +29,9 @@ export const fetchConfig = async (hass: HaExtened['hass']): Promise<SidebarConfi
   const source = await resolvePreferredConfigSource(hass, getConfigSource());
   setConfigSource(source);
   let config =
-    source === 'home_assistant_config'
+    source === 'home_assistant_profile'
+      ? await fetchHaProfileConfig(hass)
+      : source === 'home_assistant_config'
       ? await fetchHaConfig(hass)
       : source === 'static_yaml'
         ? await fetchFileConfig()
@@ -49,6 +52,12 @@ export const fetchConfig = async (hass: HaExtened['hass']): Promise<SidebarConfi
     } else if (!isValid && source === 'static_yaml') {
       config = DEFAULT_CONFIG;
       return config;
+    } else if (!isValid && source === 'home_assistant_profile') {
+      // A profile can be authored by an administrator who sees panels the target
+      // user cannot. Keep those ids in the profile and ignore them at runtime.
+      console.warn(`${CONFIG_NAME}: profile contains panels unavailable to the current user; ignoring them.`);
+      setStorage(STORAGE.HA_CONFIG_CACHE, config);
+      return config;
     } else if (!isValid && source === 'home_assistant_config') {
       const cachedConfig = getHaConfigCache();
       if (cachedConfig) {
@@ -60,7 +69,7 @@ export const fetchConfig = async (hass: HaExtened['hass']): Promise<SidebarConfi
     } else {
       config = validateConfig(config);
       _changeStorageConfig(config);
-      if (source === 'home_assistant_config') {
+      if (source === 'home_assistant_config' || source === 'home_assistant_profile') {
         setStorage(STORAGE.HA_CONFIG_CACHE, config);
       }
     }
@@ -70,6 +79,21 @@ export const fetchConfig = async (hass: HaExtened['hass']): Promise<SidebarConfi
     return undefined;
   }
   return config;
+};
+
+export const fetchHaProfileConfig = async (hass: HaExtened['hass']): Promise<SidebarConfig | undefined> => {
+  const result = await new HomeAssistantProfileProvider(hass).read();
+  if (result.valid && result.config) {
+    setStorage(STORAGE.HA_CONFIG_CACHE, result.config);
+    if (result.revision) setStorage(STORAGE.HA_CONFIG_REVISION, result.revision);
+    if (result.last_modified != null) {
+      setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, result.last_modified);
+    }
+    return result.config;
+  }
+
+  console.warn(`${CONFIG_NAME}: failed to load Home Assistant user profile.`, result.errors);
+  return getHaConfigCache();
 };
 
 export const fetchHaConfig = async (hass: HaExtened['hass']): Promise<SidebarConfig | undefined> => {
@@ -88,7 +112,7 @@ export const fetchHaConfig = async (hass: HaExtened['hass']): Promise<SidebarCon
 };
 
 const getHaConfigCache = (): SidebarConfig | undefined => {
-  const cachedConfig = window.localStorage.getItem(STORAGE.HA_CONFIG_CACHE);
+  const cachedConfig = getStorage(STORAGE.HA_CONFIG_CACHE);
   if (!cachedConfig) return undefined;
   try {
     return JSON.parse(cachedConfig);

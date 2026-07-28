@@ -20,6 +20,8 @@ validate_yaml_config = helpers.validate_yaml_config
 frontend_module_url = helpers.frontend_module_url
 file_metadata = getattr(helpers, "file_metadata", None)
 normalize_options = getattr(helpers, "normalize_options", None)
+profile_path = getattr(helpers, "profile_path", None)
+resolve_profiles_path = getattr(helpers, "resolve_profiles_path", None)
 
 
 class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
@@ -27,27 +29,34 @@ class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
         options = normalize_options({})
 
         self.assertEqual(options["config_path"], "sidebar-organizer.yaml")
+        self.assertEqual(options["profiles_path"], "sidebar-organizer-profiles")
         self.assertEqual(options["allow_write"], True)
+        self.assertEqual(options["allow_user_write"], False)
         self.assertEqual(options["create_if_missing"], True)
 
     def test_normalize_options_preserves_explicit_values(self) -> None:
         options = normalize_options(
             {
                 "config_path": "configs/sidebar-organizer.yaml",
+                "profiles_path": "configs/sidebar-organizer-profiles",
                 "allow_write": False,
+                "allow_user_write": True,
                 "create_if_missing": False,
             }
         )
 
         self.assertEqual(options["config_path"], "configs/sidebar-organizer.yaml")
         self.assertEqual(options["allow_write"], False)
+        self.assertEqual(options["allow_user_write"], True)
         self.assertEqual(options["create_if_missing"], False)
 
     def test_resolve_config_path_accepts_relative_path_inside_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             resolved = resolve_config_path(tmpdir, "configs/sidebar-organizer.yaml")
 
-        self.assertTrue(str(resolved).endswith(os.path.join("configs", "sidebar-organizer.yaml")))
+        self.assertTrue(
+            str(resolved).endswith(os.path.join("configs", "sidebar-organizer.yaml"))
+        )
 
     def test_resolve_config_path_rejects_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -58,6 +67,22 @@ class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaises(ValueError):
                 resolve_config_path(tmpdir, "/etc/passwd")
+
+    def test_resolve_profiles_path_stays_inside_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            resolved = resolve_profiles_path(tmpdir, "sidebar-organizer-profiles")
+            self.assertEqual(resolved.parent, Path(tmpdir).resolve())
+
+            with self.assertRaises(ValueError):
+                resolve_profiles_path(tmpdir, "../profiles")
+
+    def test_profile_path_uses_safe_stable_user_id(self) -> None:
+        profiles_dir = Path("/config/sidebar-organizer-profiles")
+        self.assertEqual(
+            profile_path(profiles_dir, "abc_123"), profiles_dir / "abc_123.yaml"
+        )
+        with self.assertRaises(ValueError):
+            profile_path(profiles_dir, "../secrets")
 
     def test_validate_yaml_config_accepts_minimal_valid_config(self) -> None:
         result = validate_yaml_config(
@@ -117,6 +142,17 @@ default_collapsed: {}
         self.assertEqual(metadata["exists"], False)
         self.assertIsNone(metadata["last_modified"])
         self.assertIsNone(metadata["size"])
+        self.assertIsNone(metadata["revision"])
+
+    def test_file_metadata_revision_changes_with_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "profile.yaml"
+            path.write_text("bottom_items: []\n", encoding="utf-8")
+            first = file_metadata(path)
+            path.write_text("bottom_items:\n  - energy\n", encoding="utf-8")
+            second = file_metadata(path)
+
+        self.assertNotEqual(first["revision"], second["revision"])
 
 
 if __name__ == "__main__":

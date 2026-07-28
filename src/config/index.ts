@@ -4,4 +4,5 @@ export * from './source';
 export * from './validation';
 export * from './providers/browser-storage-provider';
 export * from './providers/ha-config-provider';
+export * from './providers/ha-profile-provider';
 export * from './providers/static-yaml-provider';

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -10,21 +12,29 @@ from typing import Any
 try:
     from .const import (
         CONF_ALLOW_WRITE,
+        CONF_ALLOW_USER_WRITE,
         CONF_CONFIG_PATH,
         CONF_CREATE_IF_MISSING,
+        CONF_PROFILES_PATH,
         DEFAULT_ALLOW_WRITE,
+        DEFAULT_ALLOW_USER_WRITE,
         DEFAULT_CONFIG_PATH,
         DEFAULT_CREATE_IF_MISSING,
+        DEFAULT_PROFILES_PATH,
         FRONTEND_JS,
         FRONTEND_URL_BASE,
     )
 except ImportError:  # pragma: no cover - used by lightweight direct module tests.
     CONF_ALLOW_WRITE = "allow_write"
+    CONF_ALLOW_USER_WRITE = "allow_user_write"
     CONF_CONFIG_PATH = "config_path"
     CONF_CREATE_IF_MISSING = "create_if_missing"
+    CONF_PROFILES_PATH = "profiles_path"
     DEFAULT_ALLOW_WRITE = True
+    DEFAULT_ALLOW_USER_WRITE = False
     DEFAULT_CONFIG_PATH = "sidebar-organizer.yaml"
     DEFAULT_CREATE_IF_MISSING = True
+    DEFAULT_PROFILES_PATH = "sidebar-organizer-profiles"
     FRONTEND_JS = "sidebar-organizer.js"
     FRONTEND_URL_BASE = "/sidebar_organizer/frontend"
 
@@ -61,8 +71,12 @@ def normalize_options(raw: dict[str, Any] | None) -> dict[str, Any]:
     raw = raw or {}
     return {
         CONF_CONFIG_PATH: raw.get(CONF_CONFIG_PATH, DEFAULT_CONFIG_PATH),
+        CONF_PROFILES_PATH: raw.get(CONF_PROFILES_PATH, DEFAULT_PROFILES_PATH),
         CONF_ALLOW_WRITE: raw.get(CONF_ALLOW_WRITE, DEFAULT_ALLOW_WRITE),
-        CONF_CREATE_IF_MISSING: raw.get(CONF_CREATE_IF_MISSING, DEFAULT_CREATE_IF_MISSING),
+        CONF_ALLOW_USER_WRITE: raw.get(CONF_ALLOW_USER_WRITE, DEFAULT_ALLOW_USER_WRITE),
+        CONF_CREATE_IF_MISSING: raw.get(
+            CONF_CREATE_IF_MISSING, DEFAULT_CREATE_IF_MISSING
+        ),
     }
 
 
@@ -73,12 +87,33 @@ def resolve_config_path(config_dir: str | Path, config_path: str) -> Path:
 
     base_path = Path(config_dir).resolve()
     candidate = Path(config_path)
-    resolved = candidate.resolve() if candidate.is_absolute() else (base_path / candidate).resolve()
+    resolved = (
+        candidate.resolve()
+        if candidate.is_absolute()
+        else (base_path / candidate).resolve()
+    )
 
     if resolved != base_path and base_path not in resolved.parents:
-        raise ValueError("config_path must resolve inside the Home Assistant config directory")
+        raise ValueError(
+            "config_path must resolve inside the Home Assistant config directory"
+        )
 
     return resolved
+
+
+def resolve_profiles_path(config_dir: str | Path, profiles_path: str) -> Path:
+    """Resolve a profile directory and require it to stay under config_dir."""
+    try:
+        return resolve_config_path(config_dir, profiles_path)
+    except ValueError as err:
+        raise ValueError(str(err).replace("config_path", "profiles_path")) from err
+
+
+def profile_path(profiles_dir: Path, user_id: str) -> Path:
+    """Return the YAML path for a stable Home Assistant user id."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", user_id):
+        raise ValueError("user_id contains unsupported characters")
+    return profiles_dir / f"{user_id}.yaml"
 
 
 def validate_config_object(config: Any) -> list[str]:
@@ -88,21 +123,30 @@ def validate_config_object(config: Any) -> list[str]:
     if not isinstance(config, dict):
         return ["YAML must parse to an object/dictionary."]
 
-    for key in ("bottom_items", "bottom_grid_items", "default_collapsed", "hidden_items"):
+    for key in (
+        "bottom_items",
+        "bottom_grid_items",
+        "default_collapsed",
+        "hidden_items",
+    ):
         if key in config and not _is_list_of_strings(config[key]):
             errors.append(f"{key} must be a list of strings.")
 
     if "custom_groups" in config:
         custom_groups = config["custom_groups"]
         if not isinstance(custom_groups, dict):
-            errors.append("custom_groups must be an object mapping group names to lists of strings.")
+            errors.append(
+                "custom_groups must be an object mapping group names to lists of strings."
+            )
         else:
             for group_name, items in custom_groups.items():
                 if not isinstance(group_name, str):
                     errors.append("custom_groups group names must be strings.")
                     continue
                 if not _is_list_of_strings(items):
-                    errors.append(f"custom_groups.{group_name} must be a list of strings.")
+                    errors.append(
+                        f"custom_groups.{group_name} must be a list of strings."
+                    )
 
     if "color_config" in config and not isinstance(config["color_config"], dict):
         errors.append("color_config must be an object.")
@@ -124,7 +168,9 @@ def validate_yaml_config(yaml_text: str) -> dict[str, Any]:
 def atomic_write_text(target: Path, content: str) -> None:
     """Atomically write UTF-8 text to target."""
     target.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
+    )
     temp_path = Path(temp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as temp_file:
@@ -140,9 +186,14 @@ def atomic_write_text(target: Path, content: str) -> None:
 def file_metadata(path: Path) -> dict[str, Any]:
     """Return basic metadata for a config file."""
     if not path.exists():
-        return {"exists": False, "last_modified": None, "size": None}
+        return {"exists": False, "last_modified": None, "size": None, "revision": None}
     stat = path.stat()
-    return {"exists": True, "last_modified": stat.st_mtime, "size": stat.st_size}
+    return {
+        "exists": True,
+        "last_modified": stat.st_mtime,
+        "size": stat.st_size,
+        "revision": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
 
 
 def frontend_module_url(version: str) -> str:

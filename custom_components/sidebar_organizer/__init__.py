@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -15,15 +16,21 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import (
     CONF_ALLOW_WRITE,
+    CONF_ALLOW_USER_WRITE,
     CONF_CONFIG_PATH,
     CONF_CREATE_IF_MISSING,
+    CONF_PROFILES_PATH,
     DEFAULT_ALLOW_WRITE,
+    DEFAULT_ALLOW_USER_WRITE,
     DEFAULT_CONFIG_PATH,
     DEFAULT_CREATE_IF_MISSING,
+    DEFAULT_PROFILES_PATH,
     DOMAIN,
     FRONTEND_JS,
     FRONTEND_URL_BASE,
     FRONTEND_VERSION,
+    PROFILE_LOCK,
+    PROFILE_SUBSCRIBERS,
 )
 from .helpers import (
     DEFAULT_CONFIG_YAML,
@@ -31,6 +38,7 @@ from .helpers import (
     frontend_module_url,
     normalize_options,
     resolve_config_path,
+    resolve_profiles_path,
 )
 from .websocket_api import async_register_websocket_commands
 
@@ -43,8 +51,16 @@ CONFIG_SCHEMA = vol.Schema(
         DOMAIN: vol.Schema(
             {
                 vol.Optional(CONF_CONFIG_PATH, default=DEFAULT_CONFIG_PATH): cv.string,
+                vol.Optional(
+                    CONF_PROFILES_PATH, default=DEFAULT_PROFILES_PATH
+                ): cv.string,
                 vol.Optional(CONF_ALLOW_WRITE, default=DEFAULT_ALLOW_WRITE): cv.boolean,
-                vol.Optional(CONF_CREATE_IF_MISSING, default=DEFAULT_CREATE_IF_MISSING): cv.boolean,
+                vol.Optional(
+                    CONF_ALLOW_USER_WRITE, default=DEFAULT_ALLOW_USER_WRITE
+                ): cv.boolean,
+                vol.Optional(
+                    CONF_CREATE_IF_MISSING, default=DEFAULT_CREATE_IF_MISSING
+                ): cv.boolean,
             }
         )
     },
@@ -82,26 +98,39 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def _async_setup_from_options(hass: HomeAssistant, options: dict[str, Any]) -> bool:
+async def _async_setup_from_options(
+    hass: HomeAssistant, options: dict[str, Any]
+) -> bool:
     """Set up Sidebar Organizer runtime from normalized options."""
     config_path = options[CONF_CONFIG_PATH]
     allow_write = options[CONF_ALLOW_WRITE]
+    allow_user_write = options[CONF_ALLOW_USER_WRITE]
     create_if_missing = options[CONF_CREATE_IF_MISSING]
+    profiles_path = options[CONF_PROFILES_PATH]
 
     try:
         resolved_path = resolve_config_path(hass.config.path(), config_path)
+        resolved_profiles_path = resolve_profiles_path(
+            hass.config.path(), profiles_path
+        )
     except ValueError as err:
-        _LOGGER.error("Invalid Sidebar Organizer config_path %r: %s", config_path, err)
+        _LOGGER.error("Invalid Sidebar Organizer storage path: %s", err)
         return False
 
     hass.data[DOMAIN] = {
         CONF_CONFIG_PATH: str(resolved_path),
+        CONF_PROFILES_PATH: str(resolved_profiles_path),
         CONF_ALLOW_WRITE: allow_write,
+        CONF_ALLOW_USER_WRITE: allow_user_write,
         CONF_CREATE_IF_MISSING: create_if_missing,
+        PROFILE_LOCK: asyncio.Lock(),
+        PROFILE_SUBSCRIBERS: {},
     }
 
     if not resolved_path.exists() and create_if_missing:
-        await hass.async_add_executor_job(atomic_write_text, resolved_path, DEFAULT_CONFIG_YAML)
+        await hass.async_add_executor_job(
+            atomic_write_text, resolved_path, DEFAULT_CONFIG_YAML
+        )
 
     await _async_register_frontend(hass)
     async_register_websocket_commands(hass)
