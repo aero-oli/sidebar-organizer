@@ -30,7 +30,13 @@ export default {
     [
       '@semantic-release/git',
       {
-        assets: ['package.json'],
+        assets: [
+          'CHANGELOG.md',
+          'package.json',
+          'custom_components/sidebar_organizer/manifest.json',
+          'custom_components/sidebar_organizer/const.py',
+          'custom_components/sidebar_organizer/frontend/sidebar-organizer.js',
+        ],
       },
     ],
     [

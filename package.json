@@ -68,6 +68,7 @@
     "test:backend": "python3 -m unittest discover -s tests/backend",
     "test:frontend": "node --import tsx --test tests/frontend/*.test.ts",
     "verify": "pnpm test && pnpm run build && pnpm run check:backend && pnpm run check:bundle",
+    "version": "node scripts/sync_release_versions.mjs",
     "postversion": "pnpm run build"
   }
 }
