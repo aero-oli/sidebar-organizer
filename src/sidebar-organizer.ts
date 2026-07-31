@@ -31,13 +31,8 @@ import {
 } from '@types';
 import { _getDarkConfigMode, applyTheme } from '@utilities/apply-theme';
 import { compareHacsTagDiff } from '@utilities/compare-urls';
-import { fetchConfig } from '@utilities/configs';
-import {
-  atLeastVersion,
-  clearSidebarOrganizerStorage,
-  getCollapsedItems,
-  normalizePinnedGroups,
-} from '@utilities/configs/misc';
+import { fetchConfig, getLastConfigLoadStatus } from '@utilities/configs';
+import { atLeastVersion, clearSidebarOrganizerStorage, normalizePinnedGroups } from '@utilities/configs/misc';
 
 import './components/so-group-divider';
 import { getDefaultThemeColors, convertCustomStyles } from '@utilities/custom-styles';
@@ -68,9 +63,10 @@ import { HAElement, HAQuerySelector, HAQuerySelectorEvent, OnListenDetail } from
 import { HomeAssistantStylesManager } from 'home-assistant-styles-manager';
 
 import { SoGroupDivider } from './components/so-group-divider';
-import { isHaConfigModified, parseStoredLastModified } from './config/ha-config-refresh';
-import { HomeAssistantConfigProvider } from './config/providers/ha-config-provider';
+import { resolveCollapsedGroups } from './config/preferences';
 import { HomeAssistantProfileProvider } from './config/providers/ha-profile-provider';
+import { RuntimeLifecycle } from './runtime/lifecycle';
+import { SerialTaskQueue } from './runtime/serial-task-queue';
 import { DIVIDER_ADDED_STYLE, DRAWER_STYLE, HA_MAIN_CUSTOM_WIDTH_STYLE, HUI_ROOT_STYLE } from './sidebar-css';
 
 export class SidebarOrganizer {
@@ -107,7 +103,7 @@ export class SidebarOrganizer {
       const { HA_PANEL_LOVELACE } = event.detail;
       this._panelLovelace = HA_PANEL_LOVELACE;
       await nextRender();
-      this._watchScrollHideHeader();
+      void this._watchScrollHideHeader();
     });
 
     this._styleManager = new HomeAssistantStylesManager({
@@ -125,7 +121,7 @@ export class SidebarOrganizer {
       HA_EVENT.SIDEBAR_CONFIG_SAVED,
       HA_EVENT.HASS_EDIT_SIDEBAR,
     ].forEach((event) => {
-      window.addEventListener(event, this._handleHaEvents.bind(this));
+      window.addEventListener(event, this._handleHaEvents);
     });
 
     this._sidebarItems = [];
@@ -133,8 +129,8 @@ export class SidebarOrganizer {
     this._watchPathChanges();
     instance.listen();
     // Listen for storage changes to handle collapse state updates across tabs
-    window.addEventListener('storage', this._storageListener.bind(this));
-    this._sidebarObserver = new MutationObserver(this._watchSidebarExpansion.bind(this));
+    window.addEventListener('storage', this._storageListener);
+    this._sidebarObserver = new MutationObserver(this._watchSidebarExpansion);
   }
 
   private _homeAssistant!: HAElement;
@@ -170,9 +166,22 @@ export class SidebarOrganizer {
   public _hiddenPanels: string[] = [];
 
   private _sidebarObserver: MutationObserver;
-  private _haConfigRefreshInterval?: number;
   private _profileUnsubscribe?: () => void;
   private _activePersonalProfile = false;
+  private _effectiveRevision?: string | null;
+  private _lifecycle = new RuntimeLifecycle();
+  private _runQueue = new SerialTaskQueue();
+  private _templateUnsubscribers = new Set<() => void>();
+  private _templateSubscriptionGeneration = 0;
+  private _preferencesRevision?: string | null;
+  private _preferencesSaveTimer?: number;
+  private _syncedCollapsedItems?: Set<string>;
+  private _syncedKnownGroups?: Set<string>;
+  private _usingStaleConfig = false;
+  private _sidebarSnapshot?: {
+    attributes: Map<HTMLElement, Array<[string, string]>>;
+    parents: Array<{ children: Node[]; parent: HTMLElement }>;
+  };
 
   get hass(): HaExtened['hass'] {
     return this._ha!.hass;
@@ -180,6 +189,21 @@ export class SidebarOrganizer {
 
   get darkMode(): boolean {
     return _getDarkConfigMode(this._config.color_config, this.hass);
+  }
+
+  get diagnostics(): Record<string, unknown> {
+    return {
+      state: this._lifecycle.state,
+      generation: this._lifecycle.generation,
+      source: getConfigSource(),
+      effective_revision: this._effectiveRevision || null,
+      personal_profile: this._activePersonalProfile,
+      setup_complete: this.setupConfigDone && this.firstSetUpDone,
+      panel_count: this._baseOrder.length,
+      template_subscriptions: this._templateUnsubscribers.size,
+      stale_config: this._usingStaleConfig,
+      load_errors: getLastConfigLoadStatus().errors,
+    };
   }
 
   get _panelsList(): HTMLElement {
@@ -205,13 +229,24 @@ export class SidebarOrganizer {
     return Boolean(this._hasSidebarConfig && !this._userHasSidebarSettings);
   }
 
-  public async run(): Promise<void> {
+  public run(): Promise<void> {
+    return this._runQueue.enqueue(() => this._runOnce());
+  }
+
+  private async _runOnce(): Promise<void> {
+    const generation = this._lifecycle.begin();
+    if (this._sidebarSnapshot) this._restoreSidebarSnapshot();
+    else this._disposeTemplateSubscriptions();
+    this.setupConfigDone = false;
+    this.firstSetUpDone = false;
     if (!this.hass || this.hass.config?.state !== HA_STATE.RUNNING) {
+      this._lifecycle.transition(generation, 'idle');
       this._store._haNotRunningToast();
       return;
     }
 
     if (!atLeastVersion(this.hass.config.version, 2026, 6)) {
+      this._lifecycle.transition(generation, 'degraded');
       this._notCompatible = true;
       const msg = `${ALERT_MSG.NOT_COMPATIBLE}: ${this.hass.config.version}.\nPlease upgrade Home Assistant to 2026.6 or later.`;
       this._store._showToast(msg, 10 * 1000);
@@ -220,25 +255,45 @@ export class SidebarOrganizer {
       return;
     }
 
-    compareHacsTagDiff(this._ha.hass);
-    const profileProvider = new HomeAssistantProfileProvider(this.hass);
-    const profileInfo = await profileProvider.info();
-    this._activePersonalProfile = Boolean(profileInfo.available && profileInfo.profile_exists);
-    if (profileInfo.available && !this._profileUnsubscribe) {
-      this._profileUnsubscribe = await profileProvider.subscribe(this._handleProfileChanged);
-    }
-    await this._checkUserSidebarSettings();
-    if (this._activePersonalProfile) this._userHasSidebarSettings = false;
-    await this._watchEditLegacySidebar();
+    try {
+      compareHacsTagDiff(this._ha.hass);
+      const profileProvider = new HomeAssistantProfileProvider(this.hass);
+      const profileInfo = await profileProvider.info();
+      if (!this._lifecycle.isCurrent(generation)) return;
+      this._activePersonalProfile = Boolean(profileInfo.available && profileInfo.profile_exists);
+      this._effectiveRevision = profileInfo.revision;
+      if (profileInfo.available && !this._profileUnsubscribe) {
+        this._profileUnsubscribe = await profileProvider.subscribe(this._handleProfileChanged);
+      }
+      await this._checkUserSidebarSettings();
+      if (this._activePersonalProfile) this._userHasSidebarSettings = false;
+      await this._setupConfigBtn();
+      if (this._userHasSidebarSettings || !this._lifecycle.isCurrent(generation)) {
+        this._lifecycle.transition(generation, 'idle');
+        return;
+      }
 
-    this._setupConfigBtn();
-    if (!this._userHasSidebarSettings) {
-      await this._getConfig().then(() => {
-        this._watchScrollHideHeader();
-        this._watchHaConfigRefresh();
-        this._setupInitialConfig();
-      });
-      this._processSections();
+      this._lifecycle.transition(generation, 'loading');
+      if (!(await this._getConfig()) || !this._lifecycle.isCurrent(generation)) {
+        this._lifecycle.transition(generation, 'degraded');
+        return;
+      }
+      await this._loadSyncedPreferences(profileProvider);
+      await this._watchScrollHideHeader();
+      if (!this._lifecycle.isCurrent(generation)) return;
+      this._captureSidebarSnapshot();
+      this._lifecycle.transition(generation, 'planning');
+      await this._setupInitialConfig();
+      if (!this._lifecycle.isCurrent(generation)) return;
+      this._lifecycle.transition(generation, 'applying');
+      await this._processSections();
+      if (!this._lifecycle.isCurrent(generation)) return;
+      this.firstSetUpDone = true;
+      this._lifecycle.transition(generation, this._usingStaleConfig ? 'degraded' : 'ready');
+    } catch (err) {
+      this._restoreSidebarSnapshot();
+      this._lifecycle.transition(generation, 'degraded');
+      LOGGER.error('Sidebar Organizer setup failed safely:', err);
     }
   }
 
@@ -248,6 +303,8 @@ export class SidebarOrganizer {
 
   private _onWindowScrollHideHeader?: () => void;
   private async _watchScrollHideHeader(): Promise<void> {
+    this._onWindowScrollHideHeader?.();
+    this._onWindowScrollHideHeader = undefined;
     if (!this._config.scroll_hide_header) return;
     if (!this._panelLovelace) return;
     const huiRoot = (await this._panelLovelace.selector.$.query(SELECTOR.HUI_ROOT).element) as HTMLElement;
@@ -310,34 +367,13 @@ export class SidebarOrganizer {
     window.addEventListener('scroll', onScroll, { passive: true });
     updateHeaderVisibility();
 
-    this._onWindowScrollHideHeader?.();
     this._onWindowScrollHideHeader = () => {
       window.removeEventListener('scroll', onScroll);
     };
   }
 
-  private async _watchEditLegacySidebar(): Promise<void> {
-    if (!this._hasSidebarConfig) return;
-
-    const HaMain = customElements.get('home-assistant-main');
-    if (!HaMain) {
-      console.warn('home-assistant-main is not yet defined');
-      return;
-    }
-    Object.defineProperty(HaMain.prototype, '_sidebarEditMode', {
-      get() {
-        return false; // Always return false to block edit mode
-      },
-      set() {
-        // Ignore all global attempts to set sidebar edit mode, log the attempt
-        console.log('Blocked attempt to set sidebar edit mode');
-      },
-      configurable: true,
-    });
-  }
-
   // Observe sidebar element attrribute changes, if 'expanded' attribute is removed or added.
-  private _watchSidebarExpansion(mutations: MutationRecord[]) {
+  private _watchSidebarExpansion = (mutations: MutationRecord[]): void => {
     mutations.forEach((mutation) => {
       if (mutation.attributeName === ATTRIBUTE.EXPANDED) {
         const isExpanded = this.HaSidebar.hasAttribute('expanded');
@@ -345,119 +381,53 @@ export class SidebarOrganizer {
         this._changeGridItemTooltipPlacement(isExpanded);
       }
     });
-  }
+  };
 
   private _watchPathChanges() {
-    const callback = () => {
-      // Delay the check to allow path to update fully
-      if (this._delayTimeout) {
-        clearTimeout(this._delayTimeout);
-      }
-
-      this._delayTimeout = window.setTimeout(() => {
-        const newPath = window.location.pathname;
-        this._checkProfileSection();
-        if (newPath !== this._currentPath) {
-          this._prevPath = this._currentPath;
-          this._currentPath = newPath;
-          if (
-            this._prevPath !== null &&
-            this._prevPath === PATH.LOVELACE_DASHBOARD &&
-            this._currentPath !== PATH.LOVELACE_DASHBOARD
-          ) {
-            this._checkDashboardChange();
-          }
-        }
-      }, 200); // Delay in ms
-    };
-
-    const pushState = history.pushState;
-    const replaceState = history.replaceState;
-
-    history.pushState = function (...args) {
-      pushState.apply(this, args);
-      callback();
-    };
-
-    history.replaceState = function (...args) {
-      replaceState.apply(this, args);
-      callback();
-    };
-
-    window.addEventListener('popstate', callback);
+    window.addEventListener('popstate', this._handlePathChange);
   }
 
-  private _watchHaConfigRefresh(): void {
-    const source = getConfigSource();
-    if (
-      this._haConfigRefreshInterval !== undefined ||
-      (source !== 'home_assistant_config' && source !== 'home_assistant_profile')
-    )
-      return;
-
-    window.addEventListener('focus', this._checkHaConfigRefresh);
-    document.addEventListener('visibilitychange', this._handleVisibilityHaConfigRefresh);
-    this._haConfigRefreshInterval = window.setInterval(this._checkHaConfigRefresh, 30 * 1000);
-    if (source === 'home_assistant_profile' && !this._profileUnsubscribe) {
-      new HomeAssistantProfileProvider(this.hass).subscribe(this._handleProfileChanged).then((unsubscribe) => {
-        this._profileUnsubscribe = unsubscribe;
-      });
+  private _handlePathChange = (): void => {
+    // Delay the check to allow path to update fully
+    if (this._delayTimeout) {
+      clearTimeout(this._delayTimeout);
     }
-  }
 
-  private _handleProfileChanged = (info: { profile_exists?: boolean; revision?: string | null }): void => {
+    this._delayTimeout = window.setTimeout(() => {
+      const newPath = window.location.pathname;
+      this._checkProfileSection();
+      if (newPath !== this._currentPath) {
+        this._prevPath = this._currentPath;
+        this._currentPath = newPath;
+        if (
+          this._prevPath !== null &&
+          this._prevPath === PATH.LOVELACE_DASHBOARD &&
+          this._currentPath !== PATH.LOVELACE_DASHBOARD
+        ) {
+          this._checkDashboardChange();
+        }
+      }
+    }, 200); // Delay in ms
+  };
+
+  private _handleProfileChanged = (info: {
+    preferences_revision?: string | null;
+    profile_exists?: boolean;
+    revision?: string | null;
+  }): void => {
+    if (info.preferences_revision && info.preferences_revision !== this._preferencesRevision) {
+      this._preferencesRevision = info.preferences_revision;
+      void this.run();
+      return;
+    }
     if (Boolean(info.profile_exists) !== this._activePersonalProfile) {
       this._reloadWindow();
       return;
     }
     if (!info.revision) return;
-    const currentRevision = getStorage(STORAGE.HA_CONFIG_REVISION);
-    const parsedRevision = currentRevision ? JSON.parse(currentRevision) : undefined;
-    if (parsedRevision === info.revision) return;
-    setStorage(STORAGE.HA_CONFIG_REVISION, info.revision);
+    if (this._effectiveRevision === info.revision) return;
+    this._effectiveRevision = info.revision;
     this._reloadWindow();
-  };
-
-  private _handleVisibilityHaConfigRefresh = (): void => {
-    if (document.visibilityState === 'visible') {
-      this._checkHaConfigRefresh();
-    }
-  };
-
-  private _checkHaConfigRefresh = async (): Promise<void> => {
-    const source = getConfigSource();
-    if ((source !== 'home_assistant_config' && source !== 'home_assistant_profile') || !this.hass) return;
-
-    if (source === 'home_assistant_profile') {
-      const info = await new HomeAssistantProfileProvider(this.hass).info();
-      if (!info.available || !info.revision) return;
-      const storedRevisionValue = getStorage(STORAGE.HA_CONFIG_REVISION);
-      const storedRevision = storedRevisionValue ? JSON.parse(storedRevisionValue) : undefined;
-      if (storedRevision === undefined) {
-        setStorage(STORAGE.HA_CONFIG_REVISION, info.revision);
-        return;
-      }
-      if (storedRevision !== info.revision) {
-        setStorage(STORAGE.HA_CONFIG_REVISION, info.revision);
-        this._reloadWindow();
-      }
-      return;
-    }
-
-    const provider = new HomeAssistantConfigProvider(this.hass);
-    const info = await provider.info();
-    if (!info.available || info.last_modified == null) return;
-
-    const storedLastModified = parseStoredLastModified(getStorage(STORAGE.HA_CONFIG_LAST_MODIFIED));
-    if (storedLastModified === undefined) {
-      setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, info.last_modified);
-      return;
-    }
-
-    if (isHaConfigModified(storedLastModified, info.last_modified)) {
-      setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, info.last_modified);
-      this._reloadWindow();
-    }
   };
 
   private async _checkDashboardChange(): Promise<void> {
@@ -562,20 +532,30 @@ export class SidebarOrganizer {
     return items;
   }
 
-  private _storageListener(event: StorageEvent) {
+  private _storageListener = (event: StorageEvent): void => {
     if (event.key === getScopedStorageKey(STORAGE.COLLAPSE)) {
-      const collapsedItems = JSON.parse(event.newValue!);
+      let collapsedItems: unknown;
+      try {
+        collapsedItems = event.newValue ? JSON.parse(event.newValue) : [];
+      } catch {
+        collapsedItems = [];
+      }
+      if (!Array.isArray(collapsedItems) || !collapsedItems.every((item) => typeof item === 'string')) return;
       this.collapsedItems = new Set(collapsedItems);
       this._handleCollapsed(this.collapsedItems);
       console.log('Collapsed items updated from storage event:', this.collapsedItems);
     }
-  }
+  };
 
-  private async _handleHaEvents(event: any) {
+  private _handleHaEvents = async (event: Event & { detail?: any }): Promise<void> => {
     if (this._notCompatible) return;
-    event.stopPropagation();
     const { type, detail } = event;
-    if (!type || !detail) return;
+    if (!type) return;
+    if (type === HA_EVENT.LOCATION_CHANGED) {
+      this._handlePathChange();
+      return;
+    }
+    if (!detail) return;
     switch (type) {
       case HA_EVENT.HASS_EDIT_SIDEBAR:
         console.log('HASS Edit Sidebar Event:', detail);
@@ -608,19 +588,135 @@ export class SidebarOrganizer {
         this._handleNewConfig(detail.config, detail.useConfigFile, detail.configSource, detail.profileUserId);
         break;
     }
-  }
+  };
 
-  private async _getConfig() {
+  private async _getConfig(): Promise<boolean> {
     const config = await fetchConfig(this.hass);
     // console.log('Fetched Config:', config);
     if (!config) {
       console.log('No config found, stopping further setup');
-      return;
+      return false;
     }
     this._config = config;
+    this._usingStaleConfig = getLastConfigLoadStatus().stale;
+    if (this._usingStaleConfig) {
+      this._store._showToast('Using the last valid sidebar because the server configuration is invalid.', 8000);
+    }
+    return true;
   }
 
-  private _setupInitialConfig() {
+  private async _loadSyncedPreferences(provider: HomeAssistantProfileProvider): Promise<void> {
+    try {
+      const result = await provider.readPreferences();
+      this._preferencesRevision = result.revision;
+      if (result.revision) {
+        this._syncedCollapsedItems = new Set(result.preferences.collapsed_groups);
+        this._syncedKnownGroups = result.preferences.known_groups
+          ? new Set(result.preferences.known_groups)
+          : undefined;
+      } else {
+        this._syncedCollapsedItems = undefined;
+        this._syncedKnownGroups = undefined;
+      }
+    } catch (err) {
+      this._preferencesRevision = undefined;
+      this._syncedCollapsedItems = undefined;
+      this._syncedKnownGroups = undefined;
+      LOGGER.warn('Server-synced sidebar preferences are unavailable; using this device only.', err);
+    }
+  }
+
+  private _schedulePreferencesSave(): void {
+    const source = getConfigSource();
+    if (source !== 'home_assistant_config' && source !== 'home_assistant_profile') return;
+    if (this._preferencesSaveTimer !== undefined) window.clearTimeout(this._preferencesSaveTimer);
+    this._preferencesSaveTimer = window.setTimeout(async () => {
+      this._preferencesSaveTimer = undefined;
+      const provider = new HomeAssistantProfileProvider(this.hass);
+      try {
+        const result = await provider.writePreferences(
+          [...this.collapsedItems],
+          this._preferencesRevision,
+          this._currentGroupNames()
+        );
+        this._preferencesRevision = result.revision;
+        this._syncedKnownGroups = new Set(result.preferences.known_groups || this._currentGroupNames());
+      } catch (err) {
+        // A second device may have written first. Refresh the revision and retry
+        // once with this device's latest explicit user action.
+        try {
+          const current = await provider.readPreferences();
+          const result = await provider.writePreferences(
+            [...this.collapsedItems],
+            current.revision,
+            this._currentGroupNames()
+          );
+          this._preferencesRevision = result.revision;
+          this._syncedKnownGroups = new Set(result.preferences.known_groups || this._currentGroupNames());
+        } catch (retryError) {
+          LOGGER.warn('Could not sync collapsed sidebar groups.', retryError ?? err);
+        }
+      }
+    }, 400);
+  }
+
+  private _currentGroupNames(): string[] {
+    return Object.keys({ ...(this._config.custom_groups || {}), ...(this._config.bottom_groups || {}) });
+  }
+
+  private _disposeTemplateSubscriptions(): void {
+    this._templateSubscriptionGeneration += 1;
+    for (const unsubscribe of this._templateUnsubscribers) {
+      try {
+        unsubscribe();
+      } catch (err) {
+        LOGGER.warn('Could not dispose a template subscription.', err);
+      }
+    }
+    this._templateUnsubscribers.clear();
+  }
+
+  private _captureSidebarSnapshot(): void {
+    const topContainer = this.sideBarRoot?.querySelector(
+      SELECTOR.SIDEBAR_BEFORE_SPACER_CONTAINER
+    ) as HTMLElement | null;
+    const parents = [this._panelsList, topContainer].filter(
+      (value): value is HTMLElement => value instanceof HTMLElement
+    );
+    const elements = new Set<HTMLElement>();
+    for (const parent of parents) {
+      elements.add(parent);
+      parent.querySelectorAll<HTMLElement>('*').forEach((element) => elements.add(element));
+    }
+    this._sidebarSnapshot = {
+      attributes: new Map(
+        [...elements].map((element) => [
+          element,
+          [...element.attributes].map((attribute) => [attribute.name, attribute.value]),
+        ])
+      ),
+      parents: parents.map((parent) => ({
+        children: Array.from(parent.childNodes),
+        parent,
+      })),
+    };
+  }
+
+  private _restoreSidebarSnapshot(): void {
+    if (!this._sidebarSnapshot) return;
+    this._styleManager.removeStyle(this.sideBarRoot);
+    for (const [element, attributes] of this._sidebarSnapshot.attributes) {
+      for (const name of element.getAttributeNames()) element.removeAttribute(name);
+      for (const [name, value] of attributes) element.setAttribute(name, value);
+    }
+    for (const { children, parent } of this._sidebarSnapshot.parents) {
+      if (parent.isConnected) parent.replaceChildren(...children);
+    }
+    this._sidebarSnapshot = undefined;
+    this._disposeTemplateSubscriptions();
+  }
+
+  private async _setupInitialConfig(): Promise<void> {
     // info
     console.groupCollapsed('%cSIDEBAR-ORGANIZER:%c ℹ️ Setting from config...', 'color: #bada55;', 'color: #228be6; ');
 
@@ -646,251 +742,278 @@ export class SidebarOrganizer {
     this._pinnedGroups = normalizePinnedGroups(pinned_groups || {});
     // Initialize collapsed groups based on config, this will be used to set initial state of groups and manage collapse/expand functionality
     const allGroups = { ...(custom_groups || {}), ...(bottom_groups || {}) };
-    this.collapsedItems = getCollapsedItems(allGroups, default_collapsed);
+    this.collapsedItems = resolveCollapsedGroups(
+      Object.keys(allGroups),
+      default_collapsed,
+      this._syncedCollapsedItems,
+      this._syncedKnownGroups
+    );
 
     // Setup custom sidebar width
-    this._addCustomWidthStyle();
+    await this._addCustomWidthStyle();
     // Setup additional styles based on color config
     this._addAdditionalStyles(color_config);
 
     // Prepare base order of panels based on current sidebar state and config
-    this._setupPanelOrder();
+    await this._setupPanelOrder();
   }
 
-  private _setupPanelOrder(): void {
-    Promise.all([
+  private async _setupPanelOrder(): Promise<void> {
+    const elements = await Promise.all([
       this._sidebar.selector.$.element,
       this._sidebar.selector.$.query(SELECTOR.SIDEBAR_BEFORE_SPACER_CONTAINER).element,
-    ]).then((elements) => {
-      const [sidebarShadowRoot, beforeSpacerContainer] = elements;
-      if (!sidebarShadowRoot || !(beforeSpacerContainer instanceof HTMLElement)) {
-        return;
-      }
+    ]);
+    const [sidebarShadowRoot, beforeSpacerContainer] = elements;
+    if (!sidebarShadowRoot || !(beforeSpacerContainer instanceof HTMLElement)) return;
 
-      const { new_items, move_settings_from_fixed, notification, hidden_items, visibility_templates } = this._config;
-      const notificationMap = new Map(Object.entries(notification || {}));
-      const groupVisibilityMap = new Map<string, string>(Object.entries(visibility_templates?.groups || {}));
-      const itemVisibilityMap = new Map<string, string>(Object.entries(visibility_templates?.items || {}));
+    const { new_items, move_settings_from_fixed, notification, hidden_items, visibility_templates } = this._config;
+    const notificationMap = new Map(Object.entries(notification || {}));
+    const groupVisibilityMap = new Map<string, string>(Object.entries(visibility_templates?.groups || {}));
+    const itemVisibilityMap = new Map<string, string>(Object.entries(visibility_templates?.items || {}));
 
-      if (new_items && new_items.length > 0) {
-        // Add new items to sidebar before spacer
-        Array.from(new_items).map((item) => {
-          const newItemEl = this._createNewItem(item);
+    if (new_items && new_items.length > 0) {
+      // Add new items to sidebar before spacer
+      Array.from(new_items).map((item) => {
+        const newItemEl = this._createNewItem(item);
 
-          if (newItemEl) {
-            beforeSpacerContainer.appendChild(newItemEl);
-          }
-        });
-        console.debug('New items added to sidebar:', new_items);
-      }
-
-      if (move_settings_from_fixed === true) {
-        const settingsItem = sidebarShadowRoot.querySelector(SELECTOR.SETTINGS_ITEM) as SidebarPanelItem;
-        if (settingsItem) {
-          beforeSpacerContainer.appendChild(settingsItem);
-          console.debug('Settings item moved from fixed:', move_settings_from_fixed);
-        } else {
-          console.log(
-            '%cSIDEBAR-ORGANIZER:%c ❌ Settings item not found',
-            'color: #999999;',
-            'color: #fa5252; font-weight: 600;'
-          );
+        if (newItemEl) {
+          beforeSpacerContainer.appendChild(newItemEl);
         }
-      }
-
-      this._getContainerItems(beforeSpacerContainer).then((items) => {
-        Array.from(items).forEach((item: SidebarPanelItem) => {
-          if (item.hasAttribute(ATTRIBUTE.NEW_ITEM)) return; // Skip new items
-
-          const panelId = item.href.replace('/', '');
-          item.setAttribute(ATTRIBUTE.DATA_PANEL, panelId);
-
-          if (hidden_items?.includes(panelId)) {
-            item.style.display = 'none';
-          }
-
-          const notificationValue = notificationMap.get(panelId);
-          if (notificationValue !== undefined) {
-            this._subscribeNotification(item, notificationValue);
-          }
-        });
-
-        const initOrder = Array.from(items).map(
-          (item) => item.getAttribute(ATTRIBUTE.DATA_PANEL) || item.href.replace('/', '')
-        );
-
-        this._baseOrder = this._reorderPanelItemsByConfig(initOrder);
-        if (this._configPanelMap.size === 0) {
-          // Skip reordering if there are no groups defined in config to avoid unnecessary DOM manipulation
-          console.log(
-            '%cSIDEBAR-ORGANIZER:%c No groups defined in config, skipping initial reordering',
-            'color: #999999;',
-            'color: #228be6;'
-          );
-          return;
-        }
-
-        const topItems = document.createDocumentFragment();
-        const uncategorizedItems = document.createDocumentFragment();
-        const bottomItems = document.createDocumentFragment();
-        const bottomGridItems = document.createDocumentFragment();
-
-        const inGroup = (panel: string): string | null => this._getGroupOfPanel(panel);
-        const groupHasVisibilityTemplate = (group: string): boolean => groupVisibilityMap.has(group);
-        const itemHasVisibilityTemplate = (item: string): boolean => itemVisibilityMap.has(item);
-
-        const defaultPanelUrlPath = getDefaultPanelUrlPath(this.hass);
-
-        const orderedPanels: Omit<NewItemConfig, 'icon'>[] = [];
-        const visibilityTemplateUsageLog: { panelId: string; source: 'group' | 'item'; template: string }[] = [];
-
-        this._baseOrder.forEach((panelId) => {
-          const foundItem = Array.from(items).find((el) => el.getAttribute(ATTRIBUTE.DATA_PANEL) === panelId);
-          if (!foundItem) {
-            console.log(
-              '%cSIDEBAR-ORGANIZER:%c ❌ Panel item not found for panel ID:',
-              'color: #999999;',
-              'color: #fa5252; font-weight: 600;',
-              panelId
-            );
-          } else {
-            const group = inGroup(panelId);
-            const isNewItem = foundItem.hasAttribute(ATTRIBUTE.NEW_ITEM);
-            const groupVisibilityTemplate =
-              group && groupHasVisibilityTemplate(group) ? groupVisibilityMap.get(group)! : null;
-            const itemVisibilityTemplate = itemHasVisibilityTemplate(panelId) ? itemVisibilityMap.get(panelId)! : null;
-            const visibilityTemplate = groupVisibilityTemplate || itemVisibilityTemplate;
-
-            if (visibilityTemplate) {
-              visibilityTemplateUsageLog.push({
-                panelId,
-                source: groupVisibilityTemplate ? 'group' : 'item',
-                template: visibilityTemplate,
-              });
-
-              this._subscribeVisibility(foundItem, visibilityTemplate);
-            }
-            if (isNewItem || group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
-              const haTooltip = createHaTooltipForItem(foundItem);
-              if (group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
-                haTooltip.setAttribute(ATTRIBUTE.GRID_ITEM, '');
-                // this._gridItemTooltips.push(haTooltip);
-              }
-              foundItem.insertAdjacentElement('afterend', haTooltip);
-            }
-            const isBottomGroup = group && this._config.bottom_groups && group in this._config.bottom_groups;
-            if (group === PANEL_TYPE.BOTTOM_ITEMS || group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
-              if (group === PANEL_TYPE.BOTTOM_ITEMS) {
-                foundItem.setAttribute(ATTRIBUTE.BOTTOM, '');
-                bottomItems.appendChild(foundItem);
-              } else if (group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
-                foundItem.setAttribute(ATTRIBUTE.GRID_ITEM, '');
-                bottomGridItems.appendChild(foundItem);
-              }
-            } else if (isBottomGroup) {
-              foundItem.setAttribute(ATTRIBUTE.GROUP, group);
-              foundItem.setAttribute(ATTRIBUTE.BOTTOM, '');
-              bottomItems.appendChild(foundItem);
-            } else if (group) {
-              if (group !== PANEL_TYPE.UNCATEGORIZED_ITEMS) {
-                foundItem.setAttribute(ATTRIBUTE.GROUP, group);
-              }
-              topItems.appendChild(foundItem);
-            } else {
-              if (panelId === defaultPanelUrlPath) {
-                foundItem.setAttribute(ATTRIBUTE.DEFAULT_PANEL, '');
-                topItems.prepend(foundItem);
-              } else {
-                uncategorizedItems.appendChild(foundItem);
-              }
-            }
-            orderedPanels.push({ ...parseItemValues(foundItem), group: group || 'uncategorized' });
-          }
-        });
-
-        visibilityTemplateUsageLog.length > 0 &&
-          console.groupCollapsed('Panels with visibility templates:', visibilityTemplateUsageLog.length);
-        console.table(visibilityTemplateUsageLog);
-        console.groupEnd();
-
-        console.groupCollapsed('Ordering panels based on config:', this._baseOrder.length, 'panels');
-        console.table(orderedPanels);
-        console.groupEnd();
-
-        if (uncategorizedItems.children.length > 0 || topItems.children.length > 0) {
-          beforeSpacerContainer.appendChild(topItems);
-          beforeSpacerContainer.appendChild(uncategorizedItems);
-        }
-        if (bottomItems.children.length > 0 || bottomGridItems.children.length > 0) {
-          // this._processBottomList(bottomItems, bottomGridItems);
-          const createContainer = (
-            type: PANEL_TYPE.BOTTOM_GRID_ITEMS | PANEL_TYPE.BOTTOM_ITEMS,
-            content: DocumentFragment
-          ): HTMLElement | null => {
-            if (content.children.length === 0) {
-              return null;
-            }
-            const className = type === PANEL_TYPE.BOTTOM_ITEMS ? CLASS.BOTTOM_CONTAINER : CLASS.BOTTOM_GRID_CONTAINER;
-
-            const container = document.createElement('div') as HTMLElement;
-            container.classList.add(className);
-            container.appendChild(content);
-            return container;
-          };
-
-          const bottomContainer = createContainer(PANEL_TYPE.BOTTOM_ITEMS, bottomItems);
-          const bottomGridContainer = createContainer(PANEL_TYPE.BOTTOM_GRID_ITEMS, bottomGridItems);
-
-          if (bottomContainer || bottomGridContainer) {
-            const haMdList = document.createElement(ELEMENT.HA_LIST_NAV) as any;
-            haMdList.classList.add(CLASS.BOTTOM_LIST);
-            if (bottomContainer) {
-              haMdList.appendChild(bottomContainer);
-            }
-            if (bottomGridContainer) {
-              haMdList.appendChild(bottomGridContainer);
-              this._sidebarObserver.disconnect(); // Temporarily disconnect observer to prevent it from reacting to our DOM changes
-              this._sidebarObserver.observe(this.HaSidebar, {
-                attributes: true,
-                childList: false,
-                attributeOldValue: this.HaSidebar.hasAttribute('expanded'),
-                subtree: false,
-              });
-              this._changeGridItemTooltipPlacement(this.HaSidebar.hasAttribute('expanded'));
-            }
-            const spacer = this._panelsList.querySelector(SELECTOR.SPACER) as HTMLElement;
-            this._panelsList.insertBefore(haMdList, spacer.nextElementSibling);
-          }
-          //success
-          console.debug(
-            '%cSIDEBAR-ORGANIZER:%c ✅ Bottom items added to sidebar',
-            'color: #bada55;',
-            'color: #40c057;'
-          );
-        }
-        console.groupEnd();
       });
+      console.debug('New items added to sidebar:', new_items);
+    }
+
+    if (move_settings_from_fixed === true) {
+      const settingsItem = sidebarShadowRoot.querySelector(SELECTOR.SETTINGS_ITEM) as SidebarPanelItem;
+      if (settingsItem) {
+        beforeSpacerContainer.appendChild(settingsItem);
+        console.debug('Settings item moved from fixed:', move_settings_from_fixed);
+      } else {
+        console.log(
+          '%cSIDEBAR-ORGANIZER:%c ❌ Settings item not found',
+          'color: #999999;',
+          'color: #fa5252; font-weight: 600;'
+        );
+      }
+    }
+
+    const items = await this._getContainerItems(beforeSpacerContainer);
+    Array.from(items).forEach((item: SidebarPanelItem) => {
+      if (item.hasAttribute(ATTRIBUTE.NEW_ITEM)) return; // Skip new items
+
+      const panelId = item.href.replace('/', '');
+      item.setAttribute(ATTRIBUTE.DATA_PANEL, panelId);
+
+      if (hidden_items?.includes(panelId)) {
+        item.style.display = 'none';
+      }
+
+      const notificationValue = notificationMap.get(panelId);
+      if (notificationValue !== undefined) {
+        this._subscribeNotification(item, notificationValue);
+      }
     });
+
+    const initOrder = Array.from(items).map(
+      (item) => item.getAttribute(ATTRIBUTE.DATA_PANEL) || item.href.replace('/', '')
+    );
+
+    this._baseOrder = this._reorderPanelItemsByConfig(initOrder);
+    if (this._configPanelMap.size === 0) {
+      // Skip reordering if there are no groups defined in config to avoid unnecessary DOM manipulation
+      console.log(
+        '%cSIDEBAR-ORGANIZER:%c No groups defined in config, skipping initial reordering',
+        'color: #999999;',
+        'color: #228be6;'
+      );
+      return;
+    }
+
+    const topItems = document.createDocumentFragment();
+    const uncategorizedItems = document.createDocumentFragment();
+    const bottomItems = document.createDocumentFragment();
+    const bottomGridItems = document.createDocumentFragment();
+
+    const inGroup = (panel: string): string | null => this._getGroupOfPanel(panel);
+    const groupHasVisibilityTemplate = (group: string): boolean => groupVisibilityMap.has(group);
+    const itemHasVisibilityTemplate = (item: string): boolean => itemVisibilityMap.has(item);
+
+    const defaultPanelUrlPath = getDefaultPanelUrlPath(this.hass);
+
+    const orderedPanels: Omit<NewItemConfig, 'icon'>[] = [];
+    const visibilityTemplateUsageLog: { panelId: string; source: 'group' | 'item'; template: string }[] = [];
+
+    this._baseOrder.forEach((panelId) => {
+      const foundItem = Array.from(items).find((el) => el.getAttribute(ATTRIBUTE.DATA_PANEL) === panelId);
+      if (!foundItem) {
+        console.log(
+          '%cSIDEBAR-ORGANIZER:%c ❌ Panel item not found for panel ID:',
+          'color: #999999;',
+          'color: #fa5252; font-weight: 600;',
+          panelId
+        );
+      } else {
+        const group = inGroup(panelId);
+        const isNewItem = foundItem.hasAttribute(ATTRIBUTE.NEW_ITEM);
+        const groupVisibilityTemplate =
+          group && groupHasVisibilityTemplate(group) ? groupVisibilityMap.get(group)! : null;
+        const itemVisibilityTemplate = itemHasVisibilityTemplate(panelId) ? itemVisibilityMap.get(panelId)! : null;
+        const visibilityTemplate = groupVisibilityTemplate || itemVisibilityTemplate;
+
+        if (visibilityTemplate) {
+          visibilityTemplateUsageLog.push({
+            panelId,
+            source: groupVisibilityTemplate ? 'group' : 'item',
+            template: visibilityTemplate,
+          });
+
+          this._subscribeVisibility(foundItem, visibilityTemplate);
+        }
+        if (isNewItem || group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
+          const haTooltip = createHaTooltipForItem(foundItem);
+          if (group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
+            haTooltip.setAttribute(ATTRIBUTE.GRID_ITEM, '');
+            // this._gridItemTooltips.push(haTooltip);
+          }
+          foundItem.insertAdjacentElement('afterend', haTooltip);
+        }
+        const isBottomGroup = group && this._config.bottom_groups && group in this._config.bottom_groups;
+        if (group === PANEL_TYPE.BOTTOM_ITEMS || group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
+          if (group === PANEL_TYPE.BOTTOM_ITEMS) {
+            foundItem.setAttribute(ATTRIBUTE.BOTTOM, '');
+            bottomItems.appendChild(foundItem);
+          } else if (group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
+            foundItem.setAttribute(ATTRIBUTE.GRID_ITEM, '');
+            bottomGridItems.appendChild(foundItem);
+          }
+        } else if (isBottomGroup) {
+          foundItem.setAttribute(ATTRIBUTE.GROUP, group);
+          foundItem.setAttribute(ATTRIBUTE.BOTTOM, '');
+          bottomItems.appendChild(foundItem);
+        } else if (group) {
+          if (group !== PANEL_TYPE.UNCATEGORIZED_ITEMS) {
+            foundItem.setAttribute(ATTRIBUTE.GROUP, group);
+          }
+          topItems.appendChild(foundItem);
+        } else {
+          if (panelId === defaultPanelUrlPath) {
+            foundItem.setAttribute(ATTRIBUTE.DEFAULT_PANEL, '');
+            topItems.prepend(foundItem);
+          } else {
+            uncategorizedItems.appendChild(foundItem);
+          }
+        }
+        orderedPanels.push({ ...parseItemValues(foundItem), group: group || 'uncategorized' });
+      }
+    });
+
+    visibilityTemplateUsageLog.length > 0 &&
+      console.groupCollapsed('Panels with visibility templates:', visibilityTemplateUsageLog.length);
+    console.table(visibilityTemplateUsageLog);
+    console.groupEnd();
+
+    console.groupCollapsed('Ordering panels based on config:', this._baseOrder.length, 'panels');
+    console.table(orderedPanels);
+    console.groupEnd();
+
+    if (uncategorizedItems.children.length > 0 || topItems.children.length > 0) {
+      beforeSpacerContainer.appendChild(topItems);
+      beforeSpacerContainer.appendChild(uncategorizedItems);
+    }
+    if (bottomItems.children.length > 0 || bottomGridItems.children.length > 0) {
+      // this._processBottomList(bottomItems, bottomGridItems);
+      const createContainer = (
+        type: PANEL_TYPE.BOTTOM_GRID_ITEMS | PANEL_TYPE.BOTTOM_ITEMS,
+        content: DocumentFragment
+      ): HTMLElement | null => {
+        if (content.children.length === 0) {
+          return null;
+        }
+        const className = type === PANEL_TYPE.BOTTOM_ITEMS ? CLASS.BOTTOM_CONTAINER : CLASS.BOTTOM_GRID_CONTAINER;
+
+        const container = document.createElement('div') as HTMLElement;
+        container.classList.add(className);
+        container.appendChild(content);
+        return container;
+      };
+
+      const bottomContainer = createContainer(PANEL_TYPE.BOTTOM_ITEMS, bottomItems);
+      const bottomGridContainer = createContainer(PANEL_TYPE.BOTTOM_GRID_ITEMS, bottomGridItems);
+
+      if (bottomContainer || bottomGridContainer) {
+        const haMdList = document.createElement(ELEMENT.HA_LIST_NAV) as any;
+        haMdList.classList.add(CLASS.BOTTOM_LIST);
+        if (bottomContainer) {
+          haMdList.appendChild(bottomContainer);
+        }
+        if (bottomGridContainer) {
+          haMdList.appendChild(bottomGridContainer);
+          this._sidebarObserver.disconnect(); // Temporarily disconnect observer to prevent it from reacting to our DOM changes
+          this._sidebarObserver.observe(this.HaSidebar, {
+            attributes: true,
+            childList: false,
+            attributeOldValue: this.HaSidebar.hasAttribute('expanded'),
+            subtree: false,
+          });
+          this._changeGridItemTooltipPlacement(this.HaSidebar.hasAttribute('expanded'));
+        }
+        const spacer = this._panelsList.querySelector(SELECTOR.SPACER) as HTMLElement;
+        this._panelsList.insertBefore(haMdList, spacer.nextElementSibling);
+      }
+      //success
+      console.debug('%cSIDEBAR-ORGANIZER:%c ✅ Bottom items added to sidebar', 'color: #bada55;', 'color: #40c057;');
+    }
+    console.groupEnd();
   }
 
-  private _processSections() {
-    this._getElements().then(async (elements: ElementsStore) => {
-      const { custom_groups, bottom_groups, visibility_templates } = this._config;
-      const { topItemsContainer, topItems, bottomItemsContainer, bottomItems } = elements;
+  private async _processSections(): Promise<void> {
+    const elements: ElementsStore = await this._getElements();
+    const { custom_groups, bottom_groups, visibility_templates } = this._config;
+    const { topItemsContainer, topItems, bottomItemsContainer, bottomItems } = elements;
 
-      const groupVisibilityMap = new Map<string, string>(Object.entries(visibility_templates?.groups || {}));
+    const groupVisibilityMap = new Map<string, string>(Object.entries(visibility_templates?.groups || {}));
 
-      this._sidebarItems = [
-        ...Array.from(topItems),
-        ...(bottomItems ? Array.from(bottomItems) : []),
-      ] as SidebarPanelItem[];
+    this._sidebarItems = [
+      ...Array.from(topItems),
+      ...(bottomItems ? Array.from(bottomItems) : []),
+    ] as SidebarPanelItem[];
 
-      Object.entries(custom_groups || {}).forEach(([groupName, panels]) => {
-        if (groupName === PANEL_TYPE.UNCATEGORIZED_ITEMS) return; // Skip uncategorized group as it's not an actual group but a placeholder for ungrouped items
-        const groupVisibilityTemplate = groupVisibilityMap.has(groupName) ? groupVisibilityMap.get(groupName)! : null;
+    Object.entries(custom_groups || {}).forEach(([groupName, panels]) => {
+      if (groupName === PANEL_TYPE.UNCATEGORIZED_ITEMS) return; // Skip uncategorized group as it's not an actual group but a placeholder for ungrouped items
+      const groupVisibilityTemplate = groupVisibilityMap.has(groupName) ? groupVisibilityMap.get(groupName)! : null;
+      const isCollapsed = this.collapsedItems.has(groupName);
+      panels.forEach((panelId, index) => {
+        const item = Array.from(topItems).find((el) => el.getAttribute(ATTRIBUTE.DATA_PANEL) === panelId);
+        if (item) {
+          if (index === 0) {
+            const groupDivider = this._createDividerWithGroup(groupName, isCollapsed);
+            if (groupVisibilityTemplate) {
+              this._subscribeVisibility(groupDivider, groupVisibilityTemplate);
+            }
+            item.insertAdjacentElement('beforebegin', groupDivider);
+          }
+          item.classList.toggle(CLASS.COLLAPSED, isCollapsed);
+        }
+      });
+    });
+
+    const firstUngroupedItem = topItemsContainer.querySelector(
+      `${ELEMENT.ITEM}:not([${ATTRIBUTE.GROUP}]):not([${ATTRIBUTE.DEFAULT_PANEL}])`
+    ) as SidebarPanelItem | null;
+    if (firstUngroupedItem) {
+      const ungroupedDivider = this._createDivider(ATTRIBUTE.UNGROUPED);
+      firstUngroupedItem.insertAdjacentElement('beforebegin', ungroupedDivider);
+    }
+
+    // Process bottom groups (folder groups in bottom section)
+    if (bottomItemsContainer && bottom_groups) {
+      Object.entries(bottom_groups).forEach(([groupName, panels]) => {
         const isCollapsed = this.collapsedItems.has(groupName);
+        const groupVisibilityTemplate = groupVisibilityMap.has(groupName) ? groupVisibilityMap.get(groupName)! : null;
         panels.forEach((panelId, index) => {
-          const item = Array.from(topItems).find((el) => el.getAttribute(ATTRIBUTE.DATA_PANEL) === panelId);
+          const item = bottomItems
+            ? Array.from(bottomItems).find((el) => el.getAttribute(ATTRIBUTE.DATA_PANEL) === panelId)
+            : null;
           if (item) {
             if (index === 0) {
               const groupDivider = this._createDividerWithGroup(groupName, isCollapsed);
@@ -903,62 +1026,27 @@ export class SidebarOrganizer {
           }
         });
       });
+    }
 
-      const firstUngroupedItem = topItemsContainer.querySelector(
-        `${ELEMENT.ITEM}:not([${ATTRIBUTE.GROUP}]):not([${ATTRIBUTE.DEFAULT_PANEL}])`
-      ) as SidebarPanelItem | null;
-      if (firstUngroupedItem) {
-        const ungroupedDivider = this._createDivider(ATTRIBUTE.UNGROUPED);
-        firstUngroupedItem.insertAdjacentElement('beforebegin', ungroupedDivider);
-      }
+    // Add plain dividers for non-grouped bottom items
+    if (bottomItemsContainer && bottomItemsContainer.children.length > 0) {
+      Array.from(bottomItemsContainer.children).forEach((item) => {
+        if (item instanceof HTMLElement && !item.getAttribute(ATTRIBUTE.GROUP) && !item.classList.contains('divider')) {
+          const bottomDivider = this._createDivider(ATTRIBUTE.BOTTOM);
+          item.insertAdjacentElement('afterend', bottomDivider);
+        }
+      });
+    }
+    // Wait for DOM updates to complete before checking diffs and handling header to ensure we are working with the latest rendered state
+    await nextRender();
+    this._checkDiffs();
+    // Handle sidebar header after processing sections to ensure toggle button is added based on the presence of groups in the config and their collapsed state
+    this._handleSidebarHeader();
 
-      // Process bottom groups (folder groups in bottom section)
-      if (bottomItemsContainer && bottom_groups) {
-        Object.entries(bottom_groups).forEach(([groupName, panels]) => {
-          const isCollapsed = this.collapsedItems.has(groupName);
-          const groupVisibilityTemplate = groupVisibilityMap.has(groupName) ? groupVisibilityMap.get(groupName)! : null;
-          panels.forEach((panelId, index) => {
-            const item = bottomItems
-              ? Array.from(bottomItems).find((el) => el.getAttribute(ATTRIBUTE.DATA_PANEL) === panelId)
-              : null;
-            if (item) {
-              if (index === 0) {
-                const groupDivider = this._createDividerWithGroup(groupName, isCollapsed);
-                if (groupVisibilityTemplate) {
-                  this._subscribeVisibility(groupDivider, groupVisibilityTemplate);
-                }
-                item.insertAdjacentElement('beforebegin', groupDivider);
-              }
-              item.classList.toggle(CLASS.COLLAPSED, isCollapsed);
-            }
-          });
-        });
-      }
-
-      // Add plain dividers for non-grouped bottom items
-      if (bottomItemsContainer && bottomItemsContainer.children.length > 0) {
-        Array.from(bottomItemsContainer.children).forEach((item) => {
-          if (
-            item instanceof HTMLElement &&
-            !item.getAttribute(ATTRIBUTE.GROUP) &&
-            !item.classList.contains('divider')
-          ) {
-            const bottomDivider = this._createDivider(ATTRIBUTE.BOTTOM);
-            item.insertAdjacentElement('afterend', bottomDivider);
-          }
-        });
-      }
-      // Wait for DOM updates to complete before checking diffs and handling header to ensure we are working with the latest rendered state
-      await nextRender();
-      this._checkDiffs();
-      // Handle sidebar header after processing sections to ensure toggle button is added based on the presence of groups in the config and their collapsed state
-      this._handleSidebarHeader();
-
-      // Mark setup config as done to allow panel loaded logic to run when panels are loaded
-      this.setupConfigDone = true;
-      this._watchHaSidebarShouldUpdate();
-      this._panelLoaded();
-    });
+    // Mark setup config as done to allow panel loaded logic to run when panels are loaded
+    this.setupConfigDone = true;
+    this.firstSetUpDone = true;
+    await this._panelLoaded();
   }
 
   private async _getElements(): Promise<ElementsStore> {
@@ -1032,6 +1120,7 @@ export class SidebarOrganizer {
         : (this.collapsedItems = new Set(groupKeys));
 
       this._handleCollapsed(this.collapsedItems);
+      this._schedulePreferencesSave();
     };
 
     // Pointer events = one event stream for mouse + touch + pen
@@ -1058,6 +1147,7 @@ export class SidebarOrganizer {
       return;
     }
 
+    const generation = this._templateSubscriptionGeneration;
     subscribeRenderTemplate(
       this.hass.connection,
       (result) => {
@@ -1071,7 +1161,12 @@ export class SidebarOrganizer {
         },
         strict: true,
       }
-    );
+    )
+      .then((unsubscribe) => {
+        if (generation === this._templateSubscriptionGeneration) this._templateUnsubscribers.add(unsubscribe);
+        else unsubscribe();
+      })
+      .catch((err) => LOGGER.error('Template subscription failed:', err));
   }
 
   private _createDivider = (attribute?: string): HTMLElement => {
@@ -1118,7 +1213,11 @@ export class SidebarOrganizer {
     contentDiv.classList.add(CLASS.ADDED_CONTENT);
     contentDiv.classList.add('default');
     contentDiv.setAttribute(ATTRIBUTE.GROUP, group);
-    contentDiv.innerHTML = `<ha-icon icon="mdi:chevron-down"></ha-icon><span>${group.trim()}</span>`;
+    const icon = document.createElement(ELEMENT.HA_ICON);
+    icon.setAttribute('icon', 'mdi:chevron-down');
+    const label = document.createElement('span');
+    label.textContent = group.trim();
+    contentDiv.append(icon, label);
     contentDiv.classList.toggle(CLASS.COLLAPSED, isCollapsed);
     return contentDiv;
   };
@@ -1137,11 +1236,7 @@ export class SidebarOrganizer {
       console.log('Saved another user profile; current sidebar does not need to reload.');
       return;
     }
-    if (
-      useConfigFile ||
-      configSource === 'home_assistant_config' ||
-      configSource === 'home_assistant_profile'
-    ) {
+    if (useConfigFile || configSource === 'home_assistant_config' || configSource === 'home_assistant_profile') {
       console.log('Using shared config source');
       this._reloadWindow();
       return;
@@ -1192,21 +1287,19 @@ export class SidebarOrganizer {
     });
   }
 
-  private _addCustomWidthStyle(): void {
+  private async _addCustomWidthStyle(): Promise<void> {
     if (!this._config.width) return;
-    Promise.all([this._haMain.element as Promise<HTMLElement>]).then((elements) => {
-      const [haMain] = elements;
-      const { width } = this._config!;
-      const customWidth = this._store._utils.CONFIG._computeWidth(width);
-      if (!customWidth) {
-        console.debug('❌ Invalid custom width, skipping applying custom width style:', width);
-        return;
-      }
-      haMain.style.setProperty(CSS_VAR.CUSTOM_SIDEBAR_WIDTH, customWidth);
-      console.debug('Custom sidebar width applied:', customWidth);
+    const haMain = (await this._haMain.element) as HTMLElement;
+    const { width } = this._config;
+    const customWidth = this._store._utils.CONFIG._computeWidth(width);
+    if (!customWidth) {
+      console.debug('❌ Invalid custom width, skipping applying custom width style:', width);
+      return;
+    }
+    haMain.style.setProperty(CSS_VAR.CUSTOM_SIDEBAR_WIDTH, customWidth);
+    console.debug('Custom sidebar width applied:', customWidth);
 
-      this._styleManager.addStyle([HA_MAIN_CUSTOM_WIDTH_STYLE.toString()], haMain.shadowRoot!);
-    });
+    this._styleManager.addStyle([HA_MAIN_CUSTOM_WIDTH_STYLE.toString()], haMain.shadowRoot!);
   }
 
   private _addAdditionalStyles(color_config: SidebarConfig['color_config'], mode?: string) {
@@ -1341,28 +1434,6 @@ export class SidebarOrganizer {
     }
   };
 
-  // Watch for HA sidebar updates and prevent re-render if not necessary
-  private _watchHaSidebarShouldUpdate(): void {
-    if (!this.hass || !customElements.get(ELEMENT.HA_SIDEBAR)) {
-      return;
-    }
-    customElements.whenDefined(ELEMENT.HA_SIDEBAR).then((sidebar: CustomElementConstructor) => {
-      //info
-      console.log('%cSIDEBAR-ORGANIZER:%c ℹ️ Add Sidebar Watch shouldupdate', 'color: #bada55;', 'color: #228be6;');
-      const shouldUpdate = sidebar.prototype.shouldUpdate;
-      sidebar.prototype.shouldUpdate = function (changedProps: Map<string, unknown>): boolean {
-        if (this.hass.config.state !== HA_STATE.RUNNING) {
-          console.log('Sidebar should not update due to HA state or irrelevant prop change:', {
-            haState: this.hass.config.state,
-            changedProps: Array.from(changedProps.keys()),
-          });
-          return false;
-        }
-        return shouldUpdate.call(this, changedProps);
-      };
-    });
-  }
-
   private _changeGridItemTooltipPlacement(expanded: boolean): void {
     const gridItemTooltips = this._scrollbar.querySelectorAll(
       `${SELECTOR.HA_TOOLTIP}[${ATTRIBUTE.GRID_ITEM}]`
@@ -1404,7 +1475,7 @@ export class SidebarOrganizer {
           badge.remove();
         } else {
           // Show badge, hide icon
-          badge.innerHTML = resultContent;
+          badge.textContent = String(resultContent);
           badge.classList.toggle(CLASS.NO_VISIBLE, false);
           badge.classList.toggle(CLASS.BADGE_NUMBER, !isNaN(resultContent));
           badge.classList.toggle(CLASS.LARGE_BADGE, resultContent.length >= 3);
@@ -1416,7 +1487,7 @@ export class SidebarOrganizer {
         // Hide both elements when no value
         notifyIcon.classList.toggle(CLASS.NO_VISIBLE, true);
         notifyIcon.removeAttribute('icon');
-        badge.innerHTML = '';
+        badge.textContent = '';
         badge.classList.toggle(CLASS.NO_VISIBLE, true);
       }
     };
@@ -1531,6 +1602,7 @@ export class SidebarOrganizer {
       this.collapsedItems.delete(group);
     }
     setStorage(STORAGE.COLLAPSE, [...this.collapsedItems]);
+    this._schedulePreferencesSave();
     this._handleCollapsedChange();
   }
 

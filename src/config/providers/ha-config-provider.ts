@@ -43,10 +43,10 @@ export class HomeAssistantConfigProvider implements SidebarConfigProvider {
       const parsed = parseSidebarYamlConfig(rawYaml);
 
       if (response.valid === false && response.errors?.length) {
-        return { ...parsed, errors: response.errors, last_modified: response.last_modified, rawYaml, valid: false };
+        return { ...response, ...parsed, errors: response.errors, rawYaml, valid: false };
       }
 
-      return { ...parsed, last_modified: response.last_modified, rawYaml };
+      return { ...response, ...parsed, rawYaml };
     } catch (err) {
       return {
         errors: [this._errorMessage(err)],
@@ -74,10 +74,25 @@ export class HomeAssistantConfigProvider implements SidebarConfigProvider {
     }
   }
 
-  async write(yaml: string): Promise<ConfigProviderInfo> {
+  async write(yaml: string, expectedRevision?: string | null): Promise<ConfigProviderInfo> {
     return await this.hass.callWS<ConfigProviderInfo>({
       type: 'sidebar_organizer/config/write',
       yaml,
+      expected_revision: expectedRevision ?? null,
+    });
+  }
+
+  async subscribe(callback: (info: ConfigProviderInfo) => void): Promise<() => void> {
+    const connection = (
+      this.hass as HassWithCallWS & {
+        connection?: {
+          subscribeMessage<T>(callback: (message: T) => void, message: Record<string, unknown>): Promise<() => void>;
+        };
+      }
+    ).connection;
+    if (!connection) return () => undefined;
+    return await connection.subscribeMessage<ConfigProviderInfo>(callback, {
+      type: 'sidebar_organizer/config/subscribe',
     });
   }
 

@@ -3,7 +3,7 @@ import type * as SEC from './components/editor';
 
 declare global {
   interface Window {
-    SoDialogPreview: SEC.SidebarDialogPreview;
+    SoDialogPreview?: SEC.SidebarDialogPreview;
     SoDialogPanels: SEC.SidebarDialogPanels;
     SoDialogNewItems: SEC.SidebarDialogNewItems;
     SoDialogColors: SEC.SidebarDialogColors;

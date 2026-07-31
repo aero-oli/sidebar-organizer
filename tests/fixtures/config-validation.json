@@ -1,0 +1,93 @@
+[
+  {
+    "name": "complete valid configuration",
+    "valid": true,
+    "config": {
+      "header_title": "Home",
+      "hide_header_toggle": false,
+      "animation_off": false,
+      "animation_delay": 50,
+      "accordion_mode": true,
+      "text_transformation": "capitalize",
+      "move_settings_from_fixed": true,
+      "force_transparent_background": false,
+      "width": "300px",
+      "custom_groups": { "Rooms": ["kitchen"] },
+      "bottom_groups": { "Admin": ["config"] },
+      "bottom_items": ["energy"],
+      "bottom_grid_items": ["calendar"],
+      "hidden_items": ["map"],
+      "default_collapsed": ["Admin"],
+      "notification": { "energy": "{{ states('sensor.alerts') }}" },
+      "new_items": [
+        {
+          "title": "Docs",
+          "icon": "mdi:file-document",
+          "url_path": "https://example.com",
+          "target": "_blank",
+          "tap_action": { "action": "url" }
+        }
+      ],
+      "pinned_groups": { "Rooms": true, "Admin": { "icon": "mdi:cog" } },
+      "uncategorized_items": ["overview"],
+      "visibility_templates": {
+        "groups": { "Admin": "{{ is_state('input_boolean.admin', 'on') }}" },
+        "items": { "energy": "{{ true }}" }
+      },
+      "color_config": {
+        "border_radius": 8,
+        "light": { "divider_color": "#fff", "custom_styles": { "font-weight": "600" } },
+        "dark": { "background_color": "#111" },
+        "custom_theme": { "theme": "Backend-selected", "mode": "dark" }
+      },
+      "future_extension": { "preserved": true }
+    }
+  },
+  {
+    "name": "wrong scalar types",
+    "valid": false,
+    "error": "header_title must be a string.",
+    "config": { "header_title": ["bad"], "animation_delay": "fast", "accordion_mode": "yes" }
+  },
+  {
+    "name": "wrong group types",
+    "valid": false,
+    "error": "bottom_groups must be an object mapping group names to lists of strings.",
+    "config": { "bottom_groups": "wrong", "custom_groups": { "Rooms": "kitchen" } }
+  },
+  {
+    "name": "wrong new items type",
+    "valid": false,
+    "error": "new_items must be a list of objects.",
+    "config": { "new_items": "nope" }
+  },
+  {
+    "name": "known objects cannot be null",
+    "valid": false,
+    "error": "color_config must be an object.",
+    "config": { "color_config": null, "pinned_groups": null }
+  },
+  {
+    "name": "new item requires title",
+    "valid": false,
+    "error": "new_items[0].title must be a non-empty string.",
+    "config": { "new_items": [{ "icon": "mdi:home" }] }
+  },
+  {
+    "name": "wrong visibility shape",
+    "valid": false,
+    "error": "visibility_templates must be an object.",
+    "config": { "visibility_templates": [] }
+  },
+  {
+    "name": "wrong pinned group shape",
+    "valid": false,
+    "error": "pinned_groups.Rooms must be true or an object.",
+    "config": { "pinned_groups": { "Rooms": false } }
+  },
+  {
+    "name": "unknown keys remain valid",
+    "valid": true,
+    "config": { "unknown_feature": [1, 2, 3] }
+  }
+]

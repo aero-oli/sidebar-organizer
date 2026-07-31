@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
     CONF_ALLOW_WRITE,
@@ -15,19 +18,29 @@ from .const import (
     CONF_CONFIG_PATH,
     CONF_CREATE_IF_MISSING,
     CONF_PROFILES_PATH,
+    CONFIG_SUBSCRIBERS,
+    CONFIG_WATCH_STATE,
     DOMAIN,
     FRONTEND_URL_KEY,
     FRONTEND_VERSION,
+    MAX_CONFIG_YAML_BYTES,
     PROFILE_LOCK,
     PROFILE_SUBSCRIBERS,
+    SCHEMA_VERSION,
 )
 from .helpers import (
     DEFAULT_CONFIG_YAML,
     atomic_write_text,
+    atomic_write_with_backup,
     file_metadata,
     frontend_module_url,
+    has_revision_conflict,
+    merge_watch_revisions,
+    preferences_path,
     profile_path,
+    read_preferences,
     validate_yaml_config,
+    write_preferences,
 )
 
 TYPE_DIAGNOSTICS = f"{DOMAIN}/config/diagnostics"
@@ -35,6 +48,7 @@ TYPE_INFO = f"{DOMAIN}/config/info"
 TYPE_READ = f"{DOMAIN}/config/read"
 TYPE_VALIDATE = f"{DOMAIN}/config/validate"
 TYPE_WRITE = f"{DOMAIN}/config/write"
+TYPE_SUBSCRIBE = f"{DOMAIN}/config/subscribe"
 TYPE_PROFILE_DELETE = f"{DOMAIN}/profile/delete"
 TYPE_PROFILE_COPY = f"{DOMAIN}/profile/copy"
 TYPE_PROFILE_INFO = f"{DOMAIN}/profile/info"
@@ -42,8 +56,9 @@ TYPE_PROFILE_LIST = f"{DOMAIN}/profile/list"
 TYPE_PROFILE_READ = f"{DOMAIN}/profile/read"
 TYPE_PROFILE_SUBSCRIBE = f"{DOMAIN}/profile/subscribe"
 TYPE_PROFILE_WRITE = f"{DOMAIN}/profile/write"
+TYPE_PREFERENCES_READ = f"{DOMAIN}/preferences/read"
+TYPE_PREFERENCES_WRITE = f"{DOMAIN}/preferences/write"
 REGISTERED_KEY = f"{DOMAIN}_websocket_registered"
-MAX_PROFILE_YAML_BYTES = 512 * 1024
 
 
 @callback
@@ -57,6 +72,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_read)
     websocket_api.async_register_command(hass, websocket_validate)
     websocket_api.async_register_command(hass, websocket_write)
+    websocket_api.async_register_command(hass, websocket_subscribe)
     websocket_api.async_register_command(hass, websocket_profile_delete)
     websocket_api.async_register_command(hass, websocket_profile_copy)
     websocket_api.async_register_command(hass, websocket_profile_info)
@@ -64,18 +80,21 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_profile_read)
     websocket_api.async_register_command(hass, websocket_profile_subscribe)
     websocket_api.async_register_command(hass, websocket_profile_write)
+    websocket_api.async_register_command(hass, websocket_preferences_read)
+    websocket_api.async_register_command(hass, websocket_preferences_write)
 
 
 @websocket_api.websocket_command({vol.Required("type"): TYPE_DIAGNOSTICS})
-@callback
-def websocket_diagnostics(
+@websocket_api.async_response
+async def websocket_diagnostics(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Return install and runtime diagnostics."""
     connection.send_result(
         msg["id"],
         {
-            **_metadata(hass),
+            **(await _async_metadata(hass)),
+            "capabilities": _capabilities(connection),
             "backend_loaded": True,
             "frontend_url": hass.data.get(
                 FRONTEND_URL_KEY, frontend_module_url(FRONTEND_VERSION)
@@ -86,12 +105,14 @@ def websocket_diagnostics(
 
 
 @websocket_api.websocket_command({vol.Required("type"): TYPE_INFO})
-@callback
-def websocket_info(
+@websocket_api.async_response
+async def websocket_info(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Return backend config mode metadata."""
-    connection.send_result(msg["id"], _metadata(hass))
+    connection.send_result(
+        msg["id"], {**(await _async_metadata(hass)), "capabilities": _capabilities(connection)}
+    )
 
 
 @websocket_api.websocket_command({vol.Required("type"): TYPE_READ})
@@ -117,13 +138,27 @@ async def websocket_read(
             return
 
     yaml_text = await hass.async_add_executor_job(path.read_text, "utf-8")
-    validation = validate_yaml_config(yaml_text)
+    if len(yaml_text.encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
+        connection.send_result(
+            msg["id"],
+            {
+                **(await _async_metadata(hass)),
+                "yaml": yaml_text,
+                "raw_yaml": yaml_text,
+                "valid": False,
+                "errors": ["Configuration exceeds the 512 KiB limit."],
+            },
+        )
+        return
+    validation = await hass.async_add_executor_job(validate_yaml_config, yaml_text)
     if not validation["valid"]:
         connection.send_result(
             msg["id"],
             {
-                **_metadata(hass),
+                **(await _async_metadata(hass)),
                 "yaml": yaml_text,
+                "raw_yaml": yaml_text,
+                "config": validation["parsed"],
                 "parsed": validation["parsed"],
                 "valid": False,
                 "errors": validation["errors"],
@@ -134,8 +169,10 @@ async def websocket_read(
     connection.send_result(
         msg["id"],
         {
-            **_metadata(hass),
+            **(await _async_metadata(hass)),
             "yaml": yaml_text,
+            "raw_yaml": yaml_text,
+            "config": validation["parsed"],
             "parsed": validation["parsed"],
             "valid": True,
             "errors": [],
@@ -151,6 +188,12 @@ async def websocket_validate(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Validate supplied Sidebar Organizer YAML."""
+    if len(msg["yaml"].encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
+        connection.send_result(
+            msg["id"],
+            {"valid": False, "errors": ["Configuration exceeds the 512 KiB limit."]},
+        )
+        return
     validation = await hass.async_add_executor_job(validate_yaml_config, msg["yaml"])
     connection.send_result(
         msg["id"], {"valid": validation["valid"], "errors": validation["errors"]}
@@ -158,7 +201,11 @@ async def websocket_validate(
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): TYPE_WRITE, vol.Required("yaml"): str}
+    {
+        vol.Required("type"): TYPE_WRITE,
+        vol.Required("yaml"): str,
+        vol.Optional("expected_revision"): vol.Any(str, None),
+    }
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -171,6 +218,13 @@ async def websocket_write(
             msg["id"], "write_disabled", "Writing Sidebar Organizer config is disabled."
         )
         return
+    if len(msg["yaml"].encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
+        connection.send_error(
+            msg["id"],
+            "config_too_large",
+            "Sidebar Organizer configurations are limited to 512 KiB.",
+        )
+        return
 
     validation = await hass.async_add_executor_job(validate_yaml_config, msg["yaml"])
     if not validation["valid"]:
@@ -179,9 +233,47 @@ async def websocket_write(
         )
         return
 
-    await hass.async_add_executor_job(atomic_write_text, _path(hass), msg["yaml"])
-    connection.send_result(msg["id"], {**_metadata(hass), "valid": True, "errors": []})
-    _notify_shared_profile_subscribers(hass, connection)
+    lock = hass.data[DOMAIN][PROFILE_LOCK]
+    async with lock:
+        current_revision = await hass.async_add_executor_job(
+            lambda: file_metadata(_path(hass))["revision"]
+        )
+        if (
+            "expected_revision" in msg
+            and has_revision_conflict(msg["expected_revision"], current_revision)
+        ):
+            connection.send_error(
+                msg["id"],
+                "revision_conflict",
+                "The shared Sidebar Organizer configuration changed after it was loaded.",
+            )
+            return
+        await hass.async_add_executor_job(
+            atomic_write_with_backup, _path(hass), msg["yaml"]
+        )
+        await _async_refresh_watch_state(hass, _path(hass))
+    metadata = await _async_metadata(hass)
+    connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
+    _notify_config_subscribers(hass, metadata, exclude_connection=connection)
+    await _notify_shared_profile_subscribers(hass, connection)
+
+
+@websocket_api.websocket_command({vol.Required("type"): TYPE_SUBSCRIBE})
+@callback
+def websocket_subscribe(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Subscribe to shared configuration changes."""
+    subscriber_key = (id(connection), msg["id"])
+    hass.data[DOMAIN][CONFIG_SUBSCRIBERS][subscriber_key] = connection
+
+    def unsubscribe() -> None:
+        settings = hass.data.get(DOMAIN)
+        if settings:
+            settings[CONFIG_SUBSCRIBERS].pop(subscriber_key, None)
+
+    connection.subscriptions[msg["id"]] = unsubscribe
+    connection.send_result(msg["id"])
 
 
 @websocket_api.websocket_command(
@@ -197,7 +289,9 @@ async def websocket_profile_info(
     )
     if user_id is None:
         return
-    connection.send_result(msg["id"], _profile_metadata(hass, connection, user_id))
+    connection.send_result(
+        msg["id"], await _async_profile_metadata(hass, connection, user_id)
+    )
 
 
 @websocket_api.websocket_command(
@@ -225,12 +319,26 @@ async def websocket_profile_read(
         return
 
     yaml_text = await hass.async_add_executor_job(path.read_text, "utf-8")
+    if len(yaml_text.encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
+        connection.send_result(
+            msg["id"],
+            {
+                **(await _async_profile_metadata(hass, connection, user_id)),
+                "yaml": yaml_text,
+                "raw_yaml": yaml_text,
+                "valid": False,
+                "errors": ["Configuration exceeds the 512 KiB limit."],
+            },
+        )
+        return
     validation = await hass.async_add_executor_job(validate_yaml_config, yaml_text)
     connection.send_result(
         msg["id"],
         {
-            **_profile_metadata(hass, connection, user_id),
+            **(await _async_profile_metadata(hass, connection, user_id)),
             "yaml": yaml_text,
+            "raw_yaml": yaml_text,
+            "config": validation["parsed"],
             "parsed": validation["parsed"],
             "valid": validation["valid"],
             "errors": validation["errors"],
@@ -258,7 +366,7 @@ async def websocket_profile_write(
         hass, connection, user_id, msg["id"]
     ):
         return
-    if len(msg["yaml"].encode("utf-8")) > MAX_PROFILE_YAML_BYTES:
+    if len(msg["yaml"].encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
         connection.send_error(
             msg["id"],
             "profile_too_large",
@@ -277,8 +385,12 @@ async def websocket_profile_write(
     async with lock:
         await _ensure_default_config(hass)
         effective_path, _source = _effective_profile_path(hass, user_id)
-        current_revision = file_metadata(effective_path)["revision"]
-        if "expected_revision" in msg and msg["expected_revision"] != current_revision:
+        current_revision = await hass.async_add_executor_job(
+            lambda: file_metadata(effective_path)["revision"]
+        )
+        if "expected_revision" in msg and has_revision_conflict(
+            msg["expected_revision"], current_revision
+        ):
             connection.send_error(
                 msg["id"],
                 "revision_conflict",
@@ -287,9 +399,12 @@ async def websocket_profile_write(
             return
 
         target = _personal_profile_path(hass, user_id)
-        await hass.async_add_executor_job(atomic_write_text, target, msg["yaml"])
+        await hass.async_add_executor_job(
+            atomic_write_with_backup, target, msg["yaml"]
+        )
+        await _async_refresh_watch_state(hass, target)
 
-    metadata = _profile_metadata(hass, connection, user_id)
+    metadata = await _async_profile_metadata(hass, connection, user_id)
     connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
     _notify_profile_subscribers(hass, user_id, metadata, exclude_connection=connection)
 
@@ -317,8 +432,12 @@ async def websocket_profile_delete(
     target = _personal_profile_path(hass, user_id)
     lock = hass.data[DOMAIN][PROFILE_LOCK]
     async with lock:
-        current_revision = file_metadata(target)["revision"]
-        if "expected_revision" in msg and msg["expected_revision"] != current_revision:
+        current_revision = await hass.async_add_executor_job(
+            lambda: file_metadata(target)["revision"]
+        )
+        if "expected_revision" in msg and has_revision_conflict(
+            msg["expected_revision"], current_revision
+        ):
             connection.send_error(
                 msg["id"],
                 "revision_conflict",
@@ -327,8 +446,9 @@ async def websocket_profile_delete(
             return
         if target.exists():
             await hass.async_add_executor_job(target.unlink)
+            await _async_refresh_watch_state(hass, target)
 
-    metadata = _profile_metadata(hass, connection, user_id)
+    metadata = await _async_profile_metadata(hass, connection, user_id)
     connection.send_result(msg["id"], metadata)
     _notify_profile_subscribers(hass, user_id, metadata, exclude_connection=connection)
 
@@ -384,8 +504,12 @@ async def websocket_profile_copy(
             )
             return
         target_effective, _target_source = _effective_profile_path(hass, target_user_id)
-        current_revision = file_metadata(target_effective)["revision"]
-        if "expected_revision" in msg and msg["expected_revision"] != current_revision:
+        current_revision = await hass.async_add_executor_job(
+            lambda: file_metadata(target_effective)["revision"]
+        )
+        if "expected_revision" in msg and has_revision_conflict(
+            msg["expected_revision"], current_revision
+        ):
             connection.send_error(
                 msg["id"],
                 "revision_conflict",
@@ -393,6 +517,11 @@ async def websocket_profile_copy(
             )
             return
         yaml_text = await hass.async_add_executor_job(source_path.read_text, "utf-8")
+        if len(yaml_text.encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
+            connection.send_error(
+                msg["id"], "profile_too_large", "The source profile exceeds 512 KiB."
+            )
+            return
         validation = await hass.async_add_executor_job(validate_yaml_config, yaml_text)
         if not validation["valid"]:
             connection.send_error(
@@ -402,9 +531,12 @@ async def websocket_profile_copy(
             )
             return
         target = _personal_profile_path(hass, target_user_id)
-        await hass.async_add_executor_job(atomic_write_text, target, yaml_text)
+        await hass.async_add_executor_job(
+            atomic_write_with_backup, target, yaml_text
+        )
+        await _async_refresh_watch_state(hass, target)
 
-    metadata = _profile_metadata(hass, connection, target_user_id)
+    metadata = await _async_profile_metadata(hass, connection, target_user_id)
     connection.send_result(msg["id"], metadata)
     _notify_profile_subscribers(
         hass, target_user_id, metadata, exclude_connection=connection
@@ -459,11 +591,16 @@ async def websocket_profile_subscribe(
     if user_id is None:
         return
 
-    subscribers = hass.data[DOMAIN][PROFILE_SUBSCRIBERS]
     subscriber_key = (id(connection), msg["id"])
-    subscribers.setdefault(user_id, {})[subscriber_key] = connection
+    hass.data[DOMAIN][PROFILE_SUBSCRIBERS].setdefault(user_id, {})[
+        subscriber_key
+    ] = connection
 
     def unsubscribe() -> None:
+        settings = hass.data.get(DOMAIN)
+        if not settings:
+            return
+        subscribers = settings[PROFILE_SUBSCRIBERS]
         user_subscribers = subscribers.get(user_id, {})
         user_subscribers.pop(subscriber_key, None)
         if not user_subscribers:
@@ -471,6 +608,99 @@ async def websocket_profile_subscribe(
 
     connection.subscriptions[msg["id"]] = unsubscribe
     connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): TYPE_PREFERENCES_READ, vol.Optional("user_id"): str}
+)
+@websocket_api.async_response
+async def websocket_preferences_read(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Read small server-synced UI preferences for a user."""
+    user_id = await _resolve_target_user(
+        hass, connection, msg.get("user_id"), msg["id"]
+    )
+    if user_id is None:
+        return
+    path = preferences_path(_profiles_path(hass), user_id)
+    try:
+        preferences = await hass.async_add_executor_job(read_preferences, path)
+        metadata = await hass.async_add_executor_job(file_metadata, path)
+    except (OSError, ValueError) as err:
+        connection.send_error(msg["id"], "invalid_preferences", str(err))
+        return
+    connection.send_result(
+        msg["id"],
+        {
+            "user_id": user_id,
+            "preferences": preferences,
+            "revision": metadata["revision"],
+            "schema_version": SCHEMA_VERSION,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): TYPE_PREFERENCES_WRITE,
+        vol.Required("preferences"): dict,
+        vol.Optional("user_id"): str,
+        vol.Optional("expected_revision"): vol.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def websocket_preferences_write(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Persist per-user UI preferences with optimistic conflict detection."""
+    user_id = await _resolve_target_user(
+        hass, connection, msg.get("user_id"), msg["id"]
+    )
+    if user_id is None:
+        return
+    if user_id != connection.user.id and not connection.user.is_admin:
+        connection.send_error(
+            msg["id"], "unauthorized", "Only administrators can manage another user."
+        )
+        return
+
+    path = preferences_path(_profiles_path(hass), user_id)
+    lock = hass.data[DOMAIN][PROFILE_LOCK]
+    async with lock:
+        current = await hass.async_add_executor_job(file_metadata, path)
+        if (
+            "expected_revision" in msg
+            and has_revision_conflict(msg["expected_revision"], current["revision"])
+        ):
+            connection.send_error(
+                msg["id"],
+                "revision_conflict",
+                "Sidebar preferences changed after they were loaded.",
+            )
+            return
+        try:
+            await hass.async_add_executor_job(
+                write_preferences, path, msg["preferences"]
+            )
+        except (OSError, ValueError) as err:
+            connection.send_error(msg["id"], "invalid_preferences", str(err))
+            return
+    metadata = await hass.async_add_executor_job(file_metadata, path)
+    connection.send_result(
+        msg["id"],
+        {
+            "user_id": user_id,
+            "preferences": msg["preferences"],
+            "revision": metadata["revision"],
+            "schema_version": SCHEMA_VERSION,
+        },
+    )
+    profile_metadata = await _async_profile_metadata(hass, connection, user_id)
+    profile_metadata["preferences_revision"] = metadata["revision"]
+    _notify_profile_subscribers(
+        hass, user_id, profile_metadata, exclude_connection=connection
+    )
 
 
 async def _resolve_target_user(
@@ -560,11 +790,13 @@ def _effective_profile_path(hass: HomeAssistant, user_id: str) -> tuple[Path, st
 
 
 def _profile_metadata(
-    hass: HomeAssistant, connection: websocket_api.ActiveConnection, user_id: str
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    user_id: str,
+    metadata: dict[str, Any],
 ) -> dict[str, Any]:
     personal = _personal_profile_path(hass, user_id)
     effective, source = _effective_profile_path(hass, user_id)
-    metadata = file_metadata(effective)
     can_write = hass.data[DOMAIN][CONF_ALLOW_WRITE] and (
         connection.user.is_admin or hass.data[DOMAIN][CONF_ALLOW_USER_WRITE]
     )
@@ -575,6 +807,11 @@ def _profile_metadata(
         "user_id": user_id,
         "profile_exists": personal.exists(),
         "source": source,
+        "inherited": source == "shared",
+        "schema_version": SCHEMA_VERSION,
+        "warnings": [],
+        "stale": False,
+        "capabilities": _capabilities(connection),
         "config_path": str(effective),
         **metadata,
     }
@@ -594,14 +831,16 @@ def _notify_profile_subscribers(
         connection.send_event(subscription_id, metadata)
 
 
-def _notify_shared_profile_subscribers(
+async def _notify_shared_profile_subscribers(
     hass: HomeAssistant, exclude_connection: websocket_api.ActiveConnection
 ) -> None:
     """Notify subscribed users who currently inherit the shared configuration."""
     for user_id in list(hass.data[DOMAIN][PROFILE_SUBSCRIBERS]):
         if _personal_profile_path(hass, user_id).exists():
             continue
-        metadata = _profile_metadata(hass, exclude_connection, user_id)
+        metadata = await _async_profile_metadata(
+            hass, exclude_connection, user_id
+        )
         _notify_profile_subscribers(
             hass,
             user_id,
@@ -610,16 +849,33 @@ def _notify_shared_profile_subscribers(
         )
 
 
+def _notify_config_subscribers(
+    hass: HomeAssistant,
+    metadata: dict[str, Any],
+    exclude_connection: websocket_api.ActiveConnection | None = None,
+) -> None:
+    """Notify connected shared-config editors."""
+    subscribers = hass.data[DOMAIN][CONFIG_SUBSCRIBERS]
+    for (_connection_id, subscription_id), connection in list(subscribers.items()):
+        if connection is exclude_connection:
+            continue
+        connection.send_event(subscription_id, metadata)
+
+
 def _path(hass: HomeAssistant) -> Path:
     return Path(hass.data[DOMAIN][CONF_CONFIG_PATH])
 
 
-def _metadata(hass: HomeAssistant) -> dict[str, Any]:
+def _metadata(hass: HomeAssistant, metadata: dict[str, Any]) -> dict[str, Any]:
     settings = hass.data[DOMAIN]
     path = _path(hass)
-    metadata = file_metadata(path)
     return {
         "available": True,
+        "schema_version": SCHEMA_VERSION,
+        "source": "shared",
+        "inherited": False,
+        "warnings": [],
+        "stale": False,
         "config_path": settings[CONF_CONFIG_PATH],
         "profiles_path": settings[CONF_PROFILES_PATH],
         "allow_write": settings[CONF_ALLOW_WRITE],
@@ -627,3 +883,109 @@ def _metadata(hass: HomeAssistant) -> dict[str, Any]:
         "create_if_missing": settings[CONF_CREATE_IF_MISSING],
         **metadata,
     }
+
+
+async def _async_metadata(hass: HomeAssistant) -> dict[str, Any]:
+    metadata = await hass.async_add_executor_job(file_metadata, _path(hass))
+    return _metadata(hass, metadata)
+
+
+async def _async_profile_metadata(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    user_id: str,
+) -> dict[str, Any]:
+    effective, _source = _effective_profile_path(hass, user_id)
+    metadata = await hass.async_add_executor_job(file_metadata, effective)
+    return _profile_metadata(hass, connection, user_id, metadata)
+
+
+def _capabilities(connection: websocket_api.ActiveConnection) -> dict[str, bool]:
+    return {
+        "admin_manage_users": connection.user.is_admin,
+        "optimistic_writes": True,
+        "preferences_sync": True,
+        "subscriptions": True,
+    }
+
+
+def _collect_watch_state(hass: HomeAssistant) -> dict[str, str | None]:
+    """Collect revisions off the event loop for the shared file and profiles."""
+    shared = _path(hass)
+    profiles = _profiles_path(hass)
+    paths = [shared]
+    if profiles.exists():
+        paths.extend(
+            path
+            for path in profiles.glob("*.yaml")
+            if path.is_file() and not path.name.endswith(".yaml.bak")
+        )
+    return {str(path): file_metadata(path)["revision"] for path in paths}
+
+
+async def async_start_config_watcher(hass: HomeAssistant) -> Callable[[], None]:
+    """Start one backend watcher for manual YAML edits and return its disposer."""
+    hass.data[DOMAIN][CONFIG_WATCH_STATE] = await hass.async_add_executor_job(
+        _collect_watch_state, hass
+    )
+
+    checking = False
+
+    async def check_for_changes(_now: Any) -> None:
+        nonlocal checking
+        if checking:
+            return
+        checking = True
+        try:
+            await _async_check_for_changes(hass)
+        finally:
+            checking = False
+
+    return async_track_time_interval(hass, check_for_changes, timedelta(seconds=5))
+
+
+async def _async_check_for_changes(hass: HomeAssistant) -> None:
+    """Publish changes discovered by the central filesystem watcher."""
+    settings = hass.data.get(DOMAIN)
+    if not settings:
+        return
+    previous = settings.get(CONFIG_WATCH_STATE, {})
+    current = await hass.async_add_executor_job(_collect_watch_state, hass)
+    if current == previous:
+        return
+    settings[CONFIG_WATCH_STATE] = current
+
+    shared_key = str(_path(hass))
+    shared_changed = previous.get(shared_key) != current.get(shared_key)
+    if shared_changed:
+        _notify_config_subscribers(hass, await _async_metadata(hass))
+
+    for user_id, subscribers in list(settings[PROFILE_SUBSCRIBERS].items()):
+        personal_key = str(_personal_profile_path(hass, user_id))
+        profile_changed = previous.get(personal_key) != current.get(personal_key)
+        if not profile_changed and not (
+            shared_changed and not _personal_profile_path(hass, user_id).exists()
+        ):
+            continue
+        for (_connection_id, subscription_id), connection in list(
+            subscribers.items()
+        ):
+            connection.send_event(
+                subscription_id,
+                await _async_profile_metadata(hass, connection, user_id),
+            )
+
+
+async def _async_refresh_watch_state(hass: HomeAssistant, changed_path: Path) -> None:
+    """Record one published mutation without absorbing unrelated file changes."""
+    settings = hass.data.get(DOMAIN)
+    if settings is None:
+        return
+    changed = await hass.async_add_executor_job(
+        lambda: {str(changed_path): file_metadata(changed_path)["revision"]}
+    )
+    settings[CONFIG_WATCH_STATE] = merge_watch_revisions(
+        settings.get(CONFIG_WATCH_STATE, {}),
+        changed,
+        {str(_path(hass))},
+    )

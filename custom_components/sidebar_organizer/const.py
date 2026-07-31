@@ -16,6 +16,12 @@ DEFAULT_PROFILES_PATH = "sidebar-organizer-profiles"
 
 PROFILE_LOCK = f"{DOMAIN}_profile_lock"
 PROFILE_SUBSCRIBERS = f"{DOMAIN}_profile_subscribers"
+CONFIG_SUBSCRIBERS = f"{DOMAIN}_config_subscribers"
+CONFIG_WATCH_STATE = f"{DOMAIN}_config_watch_state"
+CONFIG_WATCH_UNSUB = f"{DOMAIN}_config_watch_unsub"
+
+SCHEMA_VERSION = 1
+MAX_CONFIG_YAML_BYTES = 512 * 1024
 
 FRONTEND_JS = "sidebar-organizer.js"
 FRONTEND_VERSION = "4.3.3"

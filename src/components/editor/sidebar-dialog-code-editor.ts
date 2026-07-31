@@ -1,5 +1,3 @@
-import type { ConfigSource } from '../../config';
-
 import { ALERT_MSG, CONFIG_NAME, STORAGE } from '@constants';
 import { SidebarConfig } from '@types';
 import { fileDownload } from '@utilities/index';
@@ -11,6 +9,8 @@ import { BaseEditor } from 'components/base-editor';
 import { html, css, TemplateResult, CSSResultGroup, nothing, PropertyValues } from 'lit';
 import { property, query } from 'lit/decorators.js';
 import YAML from 'yaml';
+
+import { type ConfigSource, isHomeAssistantConfigSource } from '../../config';
 
 @safeCustomElement('sidebar-dialog-code-editor')
 export class SidebarDialogCodeEditor extends BaseEditor {
@@ -71,7 +71,7 @@ export class SidebarDialogCodeEditor extends BaseEditor {
     const editorValue = this._editorValue();
     const rawYaml = this._yamlText();
 
-    if (this._configSource === 'home_assistant_config') {
+    if (this._usesServerYaml) {
       return html`
         ${isConfigEmpty ? emptyConfig : nothing}
         <textarea class="raw-yaml-editor" spellcheck="false" .value=${rawYaml} @input=${this._handleRawYamlInput}>
@@ -85,9 +85,6 @@ export class SidebarDialogCodeEditor extends BaseEditor {
               >${BTN_LABEL.COPY_TO_CLIPBOARD}</ha-button
             >
           </div>
-          <ha-button appearance="plain" size="s" variant="warning" @click=${() => this._handleBtnAction('delete')}
-            >${BTN_LABEL.DELETE}</ha-button
-          >
         </div>
       `;
     }
@@ -125,7 +122,7 @@ export class SidebarDialogCodeEditor extends BaseEditor {
     if (isValid) {
       console.log('YAML parsed successfully');
       this._sidebarConfig = value;
-      if (this._configSource === 'home_assistant_config') {
+      if (this._usesServerYaml) {
         this.dispatchEvent(
           new CustomEvent('raw-yaml-changed', {
             bubbles: true,
@@ -182,11 +179,9 @@ export class SidebarDialogCodeEditor extends BaseEditor {
         console.log('Downloading Config');
         break;
       case 'copy':
-        navigator.clipboard
-          .writeText(this._yamlText())
-          .then(() => {
-            console.log('Copied to clipboard');
-          });
+        navigator.clipboard.writeText(this._yamlText()).then(() => {
+          console.log('Copied to clipboard');
+        });
         break;
 
       case 'delete':
@@ -208,13 +203,11 @@ export class SidebarDialogCodeEditor extends BaseEditor {
   };
 
   private _yamlText(): string {
-    return this._configSource === 'home_assistant_config' && this._rawYaml.trim()
-      ? this._rawYaml
-      : YAML.stringify(this._sidebarConfig);
+    return this._usesServerYaml && this._rawYaml.trim() ? this._rawYaml : YAML.stringify(this._sidebarConfig);
   }
 
   private _editorValue(): SidebarConfig {
-    if (this._configSource !== 'home_assistant_config' || !this._rawYaml.trim()) {
+    if (!this._usesServerYaml || !this._rawYaml.trim()) {
       return this._sidebarConfig;
     }
     try {
@@ -222,6 +215,10 @@ export class SidebarDialogCodeEditor extends BaseEditor {
     } catch {
       return this._sidebarConfig;
     }
+  }
+
+  private get _usesServerYaml(): boolean {
+    return isHomeAssistantConfigSource(this._configSource);
   }
 
   private _dispatchConfig(config: SidebarConfig) {

@@ -24,7 +24,7 @@ const serveopts = {
 const terserOpt = {
   module: true,
   compress: {
-    drop_console: ['log', 'error'],
+    drop_console: ['log', 'debug', 'table', 'groupCollapsed', 'groupEnd'],
     module: false,
   },
 };

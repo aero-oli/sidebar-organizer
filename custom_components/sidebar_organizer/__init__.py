@@ -20,6 +20,8 @@ from .const import (
     CONF_CONFIG_PATH,
     CONF_CREATE_IF_MISSING,
     CONF_PROFILES_PATH,
+    CONFIG_SUBSCRIBERS,
+    CONFIG_WATCH_UNSUB,
     DEFAULT_ALLOW_WRITE,
     DEFAULT_ALLOW_USER_WRITE,
     DEFAULT_CONFIG_PATH,
@@ -42,7 +44,7 @@ from .helpers import (
     resolve_config_path,
     resolve_profiles_path,
 )
-from .websocket_api import async_register_websocket_commands
+from .websocket_api import async_register_websocket_commands, async_start_config_watcher
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,6 +93,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload Sidebar Organizer config entry."""
+    settings = hass.data.get(DOMAIN)
+    if settings and settings.get(CONFIG_WATCH_UNSUB):
+        settings[CONFIG_WATCH_UNSUB]()
+    if settings:
+        # WebSocket command registrations and connection subscriptions outlive
+        # a config-entry reload. Preserve the live registries so their disposer
+        # closures still address the current integration state.
+        hass.data[PROFILE_SUBSCRIBERS] = settings[PROFILE_SUBSCRIBERS]
+        hass.data[CONFIG_SUBSCRIBERS] = settings[CONFIG_SUBSCRIBERS]
     hass.data.pop(DOMAIN, None)
     return True
 
@@ -126,7 +137,8 @@ async def _async_setup_from_options(
         CONF_ALLOW_USER_WRITE: allow_user_write,
         CONF_CREATE_IF_MISSING: create_if_missing,
         PROFILE_LOCK: asyncio.Lock(),
-        PROFILE_SUBSCRIBERS: {},
+        PROFILE_SUBSCRIBERS: hass.data.pop(PROFILE_SUBSCRIBERS, {}),
+        CONFIG_SUBSCRIBERS: hass.data.pop(CONFIG_SUBSCRIBERS, {}),
     }
 
     if not resolved_path.exists() and create_if_missing:
@@ -136,6 +148,7 @@ async def _async_setup_from_options(
 
     await _async_register_frontend(hass)
     async_register_websocket_commands(hass)
+    hass.data[DOMAIN][CONFIG_WATCH_UNSUB] = await async_start_config_watcher(hass)
     return True
 
 

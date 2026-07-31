@@ -2,6 +2,7 @@ import type {
   HassWithCallWS,
   ParsedSidebarYaml,
   ProfileConfigInfo,
+  SidebarPreferencesEnvelope,
   SidebarProfileList,
 } from '../types';
 
@@ -18,10 +19,7 @@ interface ProfileReadResponse extends ProfileConfigInfo {
 
 interface ProfileHass extends HassWithCallWS {
   connection?: {
-    subscribeMessage<T>(
-      callback: (message: T) => void,
-      message: Record<string, unknown>
-    ): Promise<() => void>;
+    subscribeMessage<T>(callback: (message: T) => void, message: Record<string, unknown>): Promise<() => void>;
   };
 }
 
@@ -41,9 +39,7 @@ export class HomeAssistantProfileProvider {
 
   async read(): Promise<ParsedSidebarYaml & ProfileConfigInfo> {
     try {
-      const response = await this.hass.callWS<ProfileReadResponse>(
-        this._message('sidebar_organizer/profile/read')
-      );
+      const response = await this.hass.callWS<ProfileReadResponse>(this._message('sidebar_organizer/profile/read'));
       const rawYaml = response.yaml || '';
       const parsed = parseSidebarYamlConfig(rawYaml);
       return {
@@ -104,6 +100,26 @@ export class HomeAssistantProfileProvider {
     return await this.hass.connection.subscribeMessage<ProfileConfigInfo>(
       callback,
       this._message('sidebar_organizer/profile/subscribe')
+    );
+  }
+
+  async readPreferences(): Promise<SidebarPreferencesEnvelope> {
+    return await this.hass.callWS<SidebarPreferencesEnvelope>(this._message('sidebar_organizer/preferences/read'));
+  }
+
+  async writePreferences(
+    collapsedGroups: string[],
+    expectedRevision?: string | null,
+    knownGroups?: string[]
+  ): Promise<SidebarPreferencesEnvelope> {
+    return await this.hass.callWS<SidebarPreferencesEnvelope>(
+      this._message('sidebar_organizer/preferences/write', {
+        preferences: {
+          collapsed_groups: collapsedGroups,
+          ...(knownGroups ? { known_groups: knownGroups } : {}),
+        },
+        expected_revision: expectedRevision ?? null,
+      })
     );
   }
 

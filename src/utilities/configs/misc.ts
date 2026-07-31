@@ -2,13 +2,13 @@ import { ALERT_MSG, STORAGE } from '@constants';
 import { PinnedGroupsConfig, SidebarConfig } from '@types';
 import { getFallbackIcon } from '@utilities/is-icon';
 
-import { getStorage, removeStorage, setStorage } from '../storage-utils';
+import { getStorage, getStorageStringArray, removeStorage, setStorage } from '../storage-utils';
 
 export const getCollapsedItems = (
   customGroups: SidebarConfig['custom_groups'] = {},
   defaultCollapsed: SidebarConfig['default_collapsed'] = []
 ): Set<string> => {
-  const sidebarCollapsed = JSON.parse(getStorage(STORAGE.COLLAPSE) || '[]');
+  const sidebarCollapsed = getStorageStringArray(STORAGE.COLLAPSE);
   const groupKeys = Object.keys(customGroups);
 
   // Filter out collapsed items that don't exist in the group keys

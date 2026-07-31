@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import math
 import os
 import re
 import tempfile
@@ -117,11 +119,26 @@ def profile_path(profiles_dir: Path, user_id: str) -> Path:
 
 
 def validate_config_object(config: Any) -> list[str]:
-    """Return human-readable validation errors for a parsed Sidebar Organizer config."""
+    """Validate documented fields while preserving unknown keys for compatibility."""
     errors: list[str] = []
 
     if not isinstance(config, dict):
         return ["YAML must parse to an object/dictionary."]
+
+    for key in ("header_title",):
+        if key in config and not isinstance(config[key], str):
+            errors.append(f"{key} must be a string.")
+
+    for key in (
+        "hide_header_toggle",
+        "animation_off",
+        "accordion_mode",
+        "move_settings_from_fixed",
+        "force_transparent_background",
+        "scroll_hide_header",
+    ):
+        if key in config and not isinstance(config[key], bool):
+            errors.append(f"{key} must be a boolean.")
 
     for key in (
         "bottom_items",
@@ -132,24 +149,70 @@ def validate_config_object(config: Any) -> list[str]:
         if key in config and not _is_list_of_strings(config[key]):
             errors.append(f"{key} must be a list of strings.")
 
-    if "custom_groups" in config:
-        custom_groups = config["custom_groups"]
-        if not isinstance(custom_groups, dict):
+    for key in ("custom_groups", "bottom_groups"):
+        if key not in config:
+            continue
+        groups = config[key]
+        if not isinstance(groups, dict):
             errors.append(
-                "custom_groups must be an object mapping group names to lists of strings."
+                f"{key} must be an object mapping group names to lists of strings."
             )
         else:
-            for group_name, items in custom_groups.items():
+            for group_name, items in groups.items():
                 if not isinstance(group_name, str):
-                    errors.append("custom_groups group names must be strings.")
+                    errors.append(f"{key} group names must be strings.")
                     continue
                 if not _is_list_of_strings(items):
                     errors.append(
-                        f"custom_groups.{group_name} must be a list of strings."
+                        f"{key}.{group_name} must be a list of strings."
                     )
 
-    if "color_config" in config and not isinstance(config["color_config"], dict):
-        errors.append("color_config must be an object.")
+    if "animation_delay" in config and not _is_non_negative_number(
+        config["animation_delay"]
+    ):
+        errors.append("animation_delay must be a non-negative number.")
+
+    if "width" in config and not _is_valid_width(config["width"]):
+        errors.append(
+            "width must be a positive number or a non-empty CSS width string."
+        )
+
+    if "text_transformation" in config and config["text_transformation"] not in (
+        "none",
+        "capitalize",
+        "uppercase",
+        "lowercase",
+    ):
+        errors.append(
+            "text_transformation must be one of: none, capitalize, uppercase, lowercase."
+        )
+
+    if "color_config" in config:
+        _validate_color_config(config["color_config"], errors)
+    _validate_string_record(config, "notification", errors)
+    if "new_items" in config:
+        _validate_new_items(config["new_items"], errors)
+    if "pinned_groups" in config:
+        _validate_pinned_groups(config["pinned_groups"], errors)
+
+    if (
+        "uncategorized_items" in config
+        and not isinstance(config["uncategorized_items"], bool)
+        and not _is_list_of_strings(config["uncategorized_items"])
+    ):
+        errors.append("uncategorized_items must be a boolean or a list of strings.")
+
+    if "visibility_templates" in config:
+        visibility = config["visibility_templates"]
+        if not isinstance(visibility, dict):
+            errors.append("visibility_templates must be an object.")
+        else:
+            _validate_string_record(
+                visibility, "groups", errors, "visibility_templates."
+            )
+            _validate_string_record(
+                visibility, "items", errors, "visibility_templates."
+            )
 
     return errors
 
@@ -183,6 +246,54 @@ def atomic_write_text(target: Path, content: str) -> None:
             temp_path.unlink()
 
 
+def atomic_write_with_backup(target: Path, content: str) -> None:
+    """Atomically write text and retain the previous successful version."""
+    if target.exists():
+        atomic_write_text(
+            target.with_suffix(f"{target.suffix}.bak"), target.read_text("utf-8")
+        )
+    atomic_write_text(target, content)
+
+
+def preferences_path(profiles_dir: Path, user_id: str) -> Path:
+    """Return the server-synced UI preferences path for a stable user id."""
+    profile_path(profiles_dir, user_id)
+    return profiles_dir / f"{user_id}.preferences.json"
+
+
+def read_preferences(path: Path) -> dict[str, Any]:
+    """Read and validate per-user preferences, tolerating a missing file."""
+    if not path.exists():
+        return {"collapsed_groups": []}
+    parsed = json.loads(path.read_text("utf-8"))
+    if not isinstance(parsed, dict) or not _is_list_of_strings(
+        parsed.get("collapsed_groups", [])
+    ):
+        raise ValueError("preferences.collapsed_groups must be a list of strings")
+    known_groups = parsed.get("known_groups")
+    if known_groups is not None and not _is_list_of_strings(known_groups):
+        raise ValueError("preferences.known_groups must be a list of strings")
+    return {
+        "collapsed_groups": parsed.get("collapsed_groups", []),
+        **({"known_groups": known_groups} if known_groups is not None else {}),
+    }
+
+
+def write_preferences(path: Path, preferences: dict[str, Any]) -> None:
+    """Validate and atomically persist per-user preferences."""
+    collapsed = preferences.get("collapsed_groups")
+    if not _is_list_of_strings(collapsed):
+        raise ValueError("preferences.collapsed_groups must be a list of strings")
+    known_groups = preferences.get("known_groups")
+    if known_groups is not None and not _is_list_of_strings(known_groups):
+        raise ValueError("preferences.known_groups must be a list of strings")
+    payload = {
+        "collapsed_groups": collapsed,
+        **({"known_groups": known_groups} if known_groups is not None else {}),
+    }
+    atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
+
+
 def file_metadata(path: Path) -> dict[str, Any]:
     """Return basic metadata for a config file."""
     if not path.exists():
@@ -201,6 +312,27 @@ def file_revision(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def has_revision_conflict(expected: str | None, current: str | None) -> bool:
+    """Return whether an optimistic write was based on a stale revision."""
+    return expected != current
+
+
+def merge_watch_revisions(
+    previous: dict[str, str | None],
+    changed: dict[str, str | None],
+    required_paths: set[str] | None = None,
+) -> dict[str, str | None]:
+    """Update revisions for changed paths without baselining unrelated files."""
+    merged = dict(previous)
+    required_paths = required_paths or set()
+    for path, revision in changed.items():
+        if revision is None and path not in required_paths:
+            merged.pop(path, None)
+        else:
+            merged[path] = revision
+    return merged
+
+
 def frontend_module_url(version: str) -> str:
     """Return the frontend module URL registered by the integration."""
     return f"{FRONTEND_URL_BASE}/{FRONTEND_JS}?v={version}"
@@ -208,6 +340,132 @@ def frontend_module_url(version: str) -> str:
 
 def _is_list_of_strings(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _is_non_negative_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
+def _is_valid_width(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and value > 0
+    ) or (isinstance(value, str) and bool(value.strip()))
+
+
+def _validate_string_record(
+    parent: dict[str, Any],
+    key: str,
+    errors: list[str],
+    prefix: str = "",
+) -> None:
+    if key not in parent:
+        return
+    value = parent[key]
+    if not isinstance(value, dict):
+        errors.append(f"{prefix}{key} must be an object mapping names to strings.")
+        return
+    for name, item in value.items():
+        if not isinstance(name, str) or not isinstance(item, str):
+            errors.append(f"{prefix}{key}.{name} must be a string.")
+
+
+def _validate_color_config(value: Any, errors: list[str]) -> None:
+    if not isinstance(value, dict):
+        errors.append("color_config must be an object.")
+        return
+    if "border_radius" in value and not _is_non_negative_number(
+        value["border_radius"]
+    ):
+        errors.append("color_config.border_radius must be a non-negative number.")
+
+    color_fields = (
+        "background_color",
+        "border_top_color",
+        "custom_sidebar_background_color",
+        "divider_color",
+        "divider_text_color",
+        "scrollbar_thumb_color",
+        "sidebar_icon_color",
+    )
+    for mode in ("light", "dark"):
+        if mode not in value:
+            continue
+        colors = value[mode]
+        if not isinstance(colors, dict):
+            errors.append(f"color_config.{mode} must be an object.")
+            continue
+        for key in color_fields:
+            if key in colors and not isinstance(colors[key], str):
+                errors.append(f"color_config.{mode}.{key} must be a string.")
+        _validate_string_record(colors, "custom_styles", errors, f"color_config.{mode}.")
+
+    if "custom_theme" in value:
+        theme = value["custom_theme"]
+        if not isinstance(theme, dict):
+            errors.append("color_config.custom_theme must be an object.")
+        else:
+            if "theme" in theme and not isinstance(theme["theme"], str):
+                errors.append("color_config.custom_theme.theme must be a string.")
+            if "mode" in theme and theme["mode"] not in ("light", "dark"):
+                errors.append("color_config.custom_theme.mode must be light or dark.")
+
+
+def _validate_new_items(value: Any, errors: list[str]) -> None:
+    if not isinstance(value, list):
+        errors.append("new_items must be a list of objects.")
+        return
+    string_fields = (
+        "component_name",
+        "icon",
+        "title",
+        "url_path",
+        "config_panel_domain",
+        "notification",
+        "target",
+        "entity",
+        "group",
+        "icon_template",
+    )
+    for index, item in enumerate(value):
+        prefix = f"new_items[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{prefix} must be an object.")
+            continue
+        if not isinstance(item.get("title"), str) or not item["title"].strip():
+            errors.append(f"{prefix}.title must be a non-empty string.")
+        for key in string_fields:
+            if key in item and item[key] is not None and not isinstance(item[key], str):
+                errors.append(f"{prefix}.{key} must be a string.")
+        for key in ("default_visible", "require_admin", "show_in_sidebar"):
+            if key in item and not isinstance(item[key], bool):
+                errors.append(f"{prefix}.{key} must be a boolean.")
+        for key in ("tap_action", "hold_action", "double_tap_action"):
+            if key in item and not isinstance(item[key], dict):
+                errors.append(f"{prefix}.{key} must be an object.")
+        if "target" in item and item["target"] not in ("_blank", "_self"):
+            errors.append(f"{prefix}.target must be _blank or _self.")
+
+
+def _validate_pinned_groups(value: Any, errors: list[str]) -> None:
+    if not isinstance(value, dict):
+        errors.append("pinned_groups must be an object.")
+        return
+    for name, entry in value.items():
+        if entry is True:
+            continue
+        if not isinstance(entry, dict):
+            errors.append(f"pinned_groups.{name} must be true or an object.")
+            continue
+        if "icon" in entry and not isinstance(entry["icon"], str):
+            errors.append(f"pinned_groups.{name}.icon must be a string.")
 
 
 def _safe_load_yaml(yaml_text: str) -> Any:

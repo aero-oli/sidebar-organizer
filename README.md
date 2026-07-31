@@ -298,6 +298,7 @@ When the Sidebar Organizer backend integration is available, Sidebar Organizer c
 - `sidebar_organizer/config/read`
 - `sidebar_organizer/config/validate`
 - `sidebar_organizer/config/write`
+- `sidebar_organizer/config/subscribe`
 - `sidebar_organizer/profile/list`
 - `sidebar_organizer/profile/info`
 - `sidebar_organizer/profile/read`
@@ -305,12 +306,14 @@ When the Sidebar Organizer backend integration is available, Sidebar Organizer c
 - `sidebar_organizer/profile/delete`
 - `sidebar_organizer/profile/copy`
 - `sidebar_organizer/profile/subscribe`
+- `sidebar_organizer/preferences/read`
+- `sidebar_organizer/preferences/write`
 
 The shared YAML file is the fallback source of truth. Personal profiles are stored under `/config/sidebar-organizer-profiles/<user-id>.yaml` and take precedence for that user on every browser and device. Browser storage may keep a user-scoped last-good cache, but it is not treated as the source of truth.
 
 Administrators can select any active Home Assistant user in the Sidebar Organizer dialog, create a profile from the shared default, copy another profile, edit it, or reset it. Deleted-user profiles are retained as orphaned files until an administrator removes them. Set `allow_user_write: true` if non-admin users should be allowed to edit their own profile; it defaults to `false`.
 
-Profile changes saved through the UI are broadcast to connected devices. Clean sessions reload automatically, while an editor with unsaved changes asks before replacing them. Manual YAML edits are detected when the browser regains focus or by the periodic refresh check.
+Profile and shared-config changes are broadcast to connected devices. A single backend watcher also detects manual YAML edits, so browsers do not poll the filesystem. Clean editors reload automatically, while an editor with unsaved changes asks before replacing them. Collapsed groups are stored as separate per-user preferences and sync across devices.
 
 Example `/config/sidebar-organizer.yaml`:
 
@@ -345,7 +348,7 @@ Security notes:
 - Non-admin users can write only their own profile, and only when `allow_user_write: true`.
 - A non-admin user can access only their own profile; target users are resolved and authorized server-side.
 - `config_path` and `profiles_path` are validated server-side and must resolve inside the Home Assistant config directory.
-- Profile writes use atomic replacement and content revisions to reject stale concurrent edits.
+- Shared and profile writes use atomic replacement, previous-version backups, size limits, and content revisions to reject stale concurrent edits.
 
 ## Troubleshooting
 
@@ -353,7 +356,7 @@ Security notes:
 | --- | --- | --- |
 | Backend unavailable | Integration not configured or Home Assistant not restarted | Add Sidebar Organizer in Settings -> Devices & services and restart |
 | Duplicate custom element log | Old Dashboard resource still loaded | Remove `/hacsfiles/sidebar-organizer/sidebar-organizer.js` and old `/local/sidebar-organizer.js` resources |
-| YAML edits do not show | Browser has not reloaded backend config yet | Focus the tab, wait for the automatic reload check, or use Reload from HA config in the dialog |
+| YAML edits do not show | Backend watcher or subscription has not delivered yet | Wait a few seconds or use Reload from HA config in the dialog |
 | Cannot save | `allow_write` is false or the user is not admin | Enable write in integration options and sign in as an admin user |
 | User cannot edit their profile | Self-service profile editing is disabled | Enable `allow_user_write` in the integration options, or ask an administrator to manage the profile |
 | Different account shows stale sidebar | Old browser cache predates user-scoped storage | Reload once while signed in; Sidebar Organizer moves legacy cache into the current user namespace |

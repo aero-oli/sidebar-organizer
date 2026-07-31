@@ -23,9 +23,42 @@ export interface ConfigProviderInfo {
   profiles_path?: string;
   size?: number | null;
   revision?: string | null;
+  schema_version?: number;
+  source?: 'shared' | 'user';
+  stale?: boolean;
+  warnings?: string[];
+  capabilities?: {
+    admin_manage_users: boolean;
+    optimistic_writes: boolean;
+    preferences_sync: boolean;
+    subscriptions: boolean;
+  };
+}
+
+export interface ConfigEnvelope extends ConfigProviderInfo {
+  available: boolean;
+  config?: SidebarConfig;
+  errors: string[];
+  inherited?: boolean;
+  profile_exists?: boolean;
+  raw_yaml?: string;
+  user_id?: string;
+  valid: boolean;
+}
+
+export interface SidebarPreferences {
+  collapsed_groups: string[];
+  known_groups?: string[];
+}
+
+export interface SidebarPreferencesEnvelope {
+  preferences: SidebarPreferences;
+  revision: string | null;
+  user_id: string;
 }
 
 export interface ProfileConfigInfo extends ConfigProviderInfo {
+  preferences_revision?: string | null;
   profile_exists?: boolean;
   source?: 'shared' | 'user';
   user_id?: string;
@@ -51,6 +84,11 @@ export interface ParsedSidebarYaml {
   last_modified?: number | null;
   rawYaml?: string;
   valid: boolean;
+  revision?: string | null;
+  schema_version?: number;
+  source?: 'shared' | 'user';
+  stale?: boolean;
+  warnings?: string[];
 }
 
 export interface SidebarConfigProvider {

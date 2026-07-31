@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 import importlib.util
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +16,7 @@ helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(helpers)
 
 atomic_write_text = helpers.atomic_write_text
+atomic_write_with_backup = helpers.atomic_write_with_backup
 resolve_config_path = helpers.resolve_config_path
 validate_yaml_config = helpers.validate_yaml_config
 frontend_module_url = helpers.frontend_module_url
@@ -23,9 +25,54 @@ file_metadata = getattr(helpers, "file_metadata", None)
 normalize_options = getattr(helpers, "normalize_options", None)
 profile_path = getattr(helpers, "profile_path", None)
 resolve_profiles_path = getattr(helpers, "resolve_profiles_path", None)
+preferences_path = getattr(helpers, "preferences_path", None)
+read_preferences = getattr(helpers, "read_preferences", None)
+write_preferences = getattr(helpers, "write_preferences", None)
+validate_config_object = getattr(helpers, "validate_config_object", None)
+has_revision_conflict = getattr(helpers, "has_revision_conflict", None)
+merge_watch_revisions = getattr(helpers, "merge_watch_revisions", None)
 
 
 class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
+    def test_merge_watch_revisions_preserves_unrelated_pending_changes(self) -> None:
+        previous = {
+            "/config/sidebar-organizer.yaml": "shared-old",
+            "/config/profiles/one.yaml": "one-old",
+            "/config/profiles/two.yaml": "two-old",
+        }
+
+        merged = merge_watch_revisions(
+            previous,
+            {"/config/profiles/one.yaml": "one-new"},
+            {"/config/sidebar-organizer.yaml"},
+        )
+
+        self.assertEqual(merged["/config/profiles/one.yaml"], "one-new")
+        self.assertEqual(merged["/config/profiles/two.yaml"], "two-old")
+
+    def test_merge_watch_revisions_removes_deleted_optional_path(self) -> None:
+        merged = merge_watch_revisions(
+            {"/config/profiles/one.yaml": "one-old"},
+            {"/config/profiles/one.yaml": None},
+        )
+
+        self.assertNotIn("/config/profiles/one.yaml", merged)
+
+    def test_revision_conflict_detects_stale_and_first_writes(self) -> None:
+        self.assertFalse(has_revision_conflict("same", "same"))
+        self.assertFalse(has_revision_conflict(None, None))
+        self.assertTrue(has_revision_conflict("old", "new"))
+        self.assertTrue(has_revision_conflict(None, "existing"))
+    def test_shared_schema_fixtures(self) -> None:
+        fixtures_path = ROOT / "tests" / "fixtures" / "config-validation.json"
+        fixtures = json.loads(fixtures_path.read_text("utf-8"))
+        for fixture in fixtures:
+            with self.subTest(fixture["name"]):
+                errors = validate_config_object(fixture["config"])
+                self.assertEqual(not errors, fixture["valid"], errors)
+                if fixture.get("error"):
+                    self.assertIn(fixture["error"], errors)
+
     def test_normalize_options_uses_defaults(self) -> None:
         options = normalize_options({})
 
@@ -127,6 +174,37 @@ default_collapsed: {}
             atomic_write_text(target, "bottom_items: []\n")
 
             self.assertEqual(target.read_text(encoding="utf-8"), "bottom_items: []\n")
+
+    def test_atomic_write_with_backup_keeps_previous_version(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "sidebar-organizer.yaml"
+            atomic_write_text(target, "header_title: First\n")
+            atomic_write_with_backup(target, "header_title: Second\n")
+
+            self.assertEqual(target.read_text("utf-8"), "header_title: Second\n")
+            self.assertEqual(
+                target.with_suffix(".yaml.bak").read_text("utf-8"),
+                "header_title: First\n",
+            )
+
+    def test_preferences_round_trip_and_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = preferences_path(Path(tmpdir), "user-one")
+            self.assertEqual(read_preferences(path), {"collapsed_groups": []})
+            write_preferences(
+                path,
+                {"collapsed_groups": ["Rooms"], "known_groups": ["Rooms", "Admin"]},
+            )
+            self.assertEqual(
+                read_preferences(path),
+                {"collapsed_groups": ["Rooms"], "known_groups": ["Rooms", "Admin"]},
+            )
+            with self.assertRaises(ValueError):
+                write_preferences(path, {"collapsed_groups": "Rooms"})
+            with self.assertRaises(ValueError):
+                write_preferences(
+                    path, {"collapsed_groups": ["Rooms"], "known_groups": "Rooms"}
+                )
 
     def test_frontend_module_url_includes_version_cache_buster(self) -> None:
         self.assertEqual(

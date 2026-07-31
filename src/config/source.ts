@@ -3,6 +3,9 @@ import type { ConfigSource, HassWithCallWS } from './types';
 import { HomeAssistantConfigProvider } from './providers/ha-config-provider';
 import { HomeAssistantProfileProvider } from './providers/ha-profile-provider';
 
+export const isHomeAssistantConfigSource = (source: ConfigSource): boolean =>
+  source === 'home_assistant_config' || source === 'home_assistant_profile';
+
 export const resolvePreferredConfigSource = async (
   hass: HassWithCallWS | undefined,
   currentSource: ConfigSource

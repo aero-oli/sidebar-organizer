@@ -50,9 +50,12 @@ export const removeStorage = (key: string): void => {
 };
 
 export const getHiddenPanels = (): string[] => {
-  const hiddenPanels = getStorage(STORAGE.HIDDEN_PANELS);
-  if (!hiddenPanels || hiddenPanels === 'null' || hiddenPanels === 'undefined') return [];
-  return JSON.parse(hiddenPanels);
+  return getStorageStringArray(STORAGE.HIDDEN_PANELS);
+};
+
+export const getStorageStringArray = (key: string): string[] => {
+  const value = parseStorageValue(getStorage(key));
+  return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : [];
 };
 
 export const sidebarUseConfigFile = (): boolean => {
@@ -73,14 +76,14 @@ export const setConfigSource = (source: ConfigSource): void => {
 };
 
 export const getStorageConfig = (): SidebarConfig | undefined => {
-  const config = getStorage(STORAGE.UI_CONFIG);
-  if (!config || JSON.parse(config).length === 0) return undefined;
-  return JSON.parse(config);
+  const config = parseStorageValue(getStorage(STORAGE.UI_CONFIG));
+  return typeof config === 'object' && config !== null && !Array.isArray(config)
+    ? (config as SidebarConfig)
+    : undefined;
 };
 
 export const isStoragePanelEmpty = (): boolean => {
-  const storagePanel = getStorage(STORAGE.PANEL_ORDER);
-  return !storagePanel || JSON.parse(storagePanel).length === 0;
+  return getStorageStringArray(STORAGE.PANEL_ORDER).length === 0;
 };
 
 const parseStorageValue = (value: string | null): unknown => {

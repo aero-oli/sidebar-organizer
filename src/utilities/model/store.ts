@@ -6,7 +6,7 @@ import { DashboardPanels, DataTableItem } from '@utilities/dashboard';
 import { nextRender } from '@utilities/dom-utils';
 import { UTILITIES } from '@utilities/index';
 import { shallowEqual } from '@utilities/shallow-equal';
-import { getStorage, setStorage } from '@utilities/storage-utils';
+import { getStorageStringArray, setStorage } from '@utilities/storage-utils';
 import { showToast } from '@utilities/toast-notify';
 import { isEmpty } from 'es-toolkit/compat';
 
@@ -130,7 +130,7 @@ export default class Store {
 
     // Handle added panels — merge into stored panel order so they are not re-detected as new
     if (added && added.length > 0) {
-      const currentOrder: string[] = JSON.parse(getStorage(STORAGE.PANEL_ORDER) || '[]');
+      const currentOrder = getStorageStringArray(STORAGE.PANEL_ORDER);
       const addedPaths = added.map((item) => item.url_path!);
       const newPaths = addedPaths.filter((path) => !currentOrder.includes(path));
       if (newPaths.length > 0) {

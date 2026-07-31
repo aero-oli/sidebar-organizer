@@ -36,11 +36,19 @@ export class SidebarDialogPreview extends BaseEditor {
   @state() private _previewPanels: PreviewPanels = {};
   @state() private _collapsedGroups = new Set<string>();
   @state() private _ready = false;
+  private _templateUnsubscribers = new Set<() => void>();
+  private _subscriptionGeneration = 0;
 
   @query('.divider-preview') private _previewContainer!: HTMLElement;
   @query('.panels-list') private _panelsList!: HTMLElement;
   @query('.groups-container') private _groupsContainer!: HTMLElement;
   @queryAll('a') private _itemAnchorList!: HTMLElement[];
+
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._disposeTemplateSubscriptions();
+    if (window.SoDialogPreview === this) window.SoDialogPreview = undefined;
+  }
 
   protected willUpdate(_changedProperties: PropertyValues): void {
     if (_changedProperties.has('_sidebarConfig') && this._sidebarConfig && isEmpty(this._previewPanels)) {
@@ -239,7 +247,7 @@ export class SidebarDialogPreview extends BaseEditor {
           icon.setAttribute('icon', result);
         } else {
           icon.remove();
-          badge.innerHTML = result;
+          badge.textContent = String(result);
         }
       } else {
         badge.remove();
@@ -256,6 +264,7 @@ export class SidebarDialogPreview extends BaseEditor {
       return;
     }
 
+    const generation = this._subscriptionGeneration;
     subscribeRenderTemplate(
       this.hass.connection,
       (result) => {
@@ -269,10 +278,19 @@ export class SidebarDialogPreview extends BaseEditor {
         },
         strict: true,
       }
-    );
+    )
+      .then((unsubscribe) => {
+        if (generation === this._subscriptionGeneration && this.isConnected) {
+          this._templateUnsubscribers.add(unsubscribe);
+        } else {
+          unsubscribe();
+        }
+      })
+      .catch((err) => console.warn('Preview template subscription failed.', err));
   }
 
   private _handleNotifyChange(): void {
+    this._disposeTemplateSubscriptions();
     const notifyItems = this._panelsList?.querySelectorAll('.notification-badge') as NodeListOf<HTMLElement>;
     if (!notifyItems) {
       console.log('No notify items found');
@@ -282,6 +300,18 @@ export class SidebarDialogPreview extends BaseEditor {
     setTimeout(() => {
       this._addNotification();
     }, 0);
+  }
+
+  private _disposeTemplateSubscriptions(): void {
+    this._subscriptionGeneration += 1;
+    for (const unsubscribe of this._templateUnsubscribers) {
+      try {
+        unsubscribe();
+      } catch (err) {
+        console.warn('Could not dispose a preview template subscription.', err);
+      }
+    }
+    this._templateUnsubscribers.clear();
   }
 
   public _updateListbox(newConfig?: SidebarConfig): void {

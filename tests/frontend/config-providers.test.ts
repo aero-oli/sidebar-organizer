@@ -1,20 +1,30 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 import { isHaConfigModified } from '../../src/config/ha-config-refresh';
 import { HomeAssistantConfigProvider } from '../../src/config/providers/ha-config-provider';
 import { HomeAssistantProfileProvider } from '../../src/config/providers/ha-profile-provider';
-import { resolvePreferredConfigSource } from '../../src/config/source';
-import { parseSidebarYamlConfig } from '../../src/config/validation';
+import { isHomeAssistantConfigSource, resolvePreferredConfigSource } from '../../src/config/source';
+import { parseSidebarYamlConfig, validateSidebarConfigShape } from '../../src/config/validation';
+import { configFingerprint, isConfigDraftDirty } from '../../src/config/fingerprint';
 import { defineCustomElementSafely } from '../../src/utilities/safe-custom-element';
 import { claimSidebarOrganizerModuleLoad } from '../../src/utilities/module-load-guard';
 import { hasBlockingConfigErrors } from '../../src/utilities/configs/validators';
 import {
+  getHiddenPanels,
   getScopedStorageKey,
   getStorage,
+  getStorageConfig,
+  isStoragePanelEmpty,
   setActiveStorageUser,
   setStorage,
 } from '../../src/utilities/storage-utils';
+import { getHaConfigCache, getHaConfigCacheKey } from '../../src/utilities/configs/fetcher';
+import { RuntimeLifecycle } from '../../src/runtime/lifecycle';
+import { SerialTaskQueue } from '../../src/runtime/serial-task-queue';
+import { SubscriptionGuard } from '../../src/runtime/subscription-guard';
+import { resolveCollapsedGroups } from '../../src/config/preferences';
 
 describe('parseSidebarYamlConfig', () => {
   it('parses and normalizes valid sidebar YAML', () => {
@@ -54,6 +64,113 @@ default_collapsed:
   });
 });
 
+describe('shared configuration schema fixtures', () => {
+  const fixtures = JSON.parse(
+    readFileSync(new URL('../fixtures/config-validation.json', import.meta.url), 'utf8')
+  ) as Array<{ config: unknown; error?: string; name: string; valid: boolean }>;
+
+  for (const fixture of fixtures) {
+    it(fixture.name, () => {
+      const errors = validateSidebarConfigShape(fixture.config);
+      assert.equal(errors.length === 0, fixture.valid, errors.join('\n'));
+      if (fixture.error) assert.ok(errors.includes(fixture.error), errors.join('\n'));
+    });
+  }
+});
+
+describe('configFingerprint', () => {
+  it('ignores object key order but preserves array order', () => {
+    assert.equal(configFingerprint({ b: 2, a: { y: 2, x: 1 } }), configFingerprint({ a: { x: 1, y: 2 }, b: 2 }));
+    assert.notEqual(configFingerprint({ items: ['a', 'b'] }), configFingerprint({ items: ['b', 'a'] }));
+  });
+
+  it('keeps comment-only raw YAML edits dirty for server profiles', () => {
+    const config = { bottom_items: [] };
+    assert.equal(isConfigDraftDirty(config, config, 'bottom_items: []\n', '# note\nbottom_items: []\n', true), true);
+    assert.equal(isConfigDraftDirty(config, config, 'bottom_items: []\n', '# note\nbottom_items: []\n', false), false);
+  });
+});
+
+describe('RuntimeLifecycle', () => {
+  it('rejects transitions from superseded async runs', () => {
+    const lifecycle = new RuntimeLifecycle();
+    const first = lifecycle.begin();
+    lifecycle.transition(first, 'loading');
+    const second = lifecycle.begin();
+
+    assert.equal(lifecycle.transition(first, 'ready'), false);
+    assert.equal(lifecycle.state, 'discovering');
+    assert.equal(lifecycle.transition(second, 'ready'), true);
+    assert.equal(lifecycle.state, 'ready');
+  });
+});
+
+describe('SerialTaskQueue', () => {
+  it('does not overlap tasks and continues after a rejection', async () => {
+    const queue = new SerialTaskQueue();
+    const events: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => (releaseFirst = resolve));
+
+    const first = queue.enqueue(async () => {
+      events.push('first:start');
+      await firstGate;
+      events.push('first:end');
+      throw new Error('expected');
+    });
+    const second = queue.enqueue(async () => {
+      events.push('second');
+    });
+
+    await Promise.resolve();
+    assert.deepEqual(events, ['first:start']);
+    releaseFirst();
+    await assert.rejects(first, /expected/);
+    await second;
+    assert.deepEqual(events, ['first:start', 'first:end', 'second']);
+  });
+});
+
+describe('resolveCollapsedGroups', () => {
+  it('drops removed groups and applies defaults only to newly introduced groups', () => {
+    assert.deepEqual(
+      [
+        ...resolveCollapsedGroups(
+          ['Rooms', 'Admin', 'New'],
+          ['Rooms', 'New'],
+          new Set(['Admin', 'Removed']),
+          new Set(['Rooms', 'Admin'])
+        ),
+      ],
+      ['Admin', 'New']
+    );
+  });
+
+  it('preserves legacy synced choices without reviving configured defaults', () => {
+    assert.deepEqual(
+      [...resolveCollapsedGroups(['Rooms', 'Admin'], ['Rooms'], new Set(['Admin', 'Removed']), undefined)],
+      ['Admin']
+    );
+    assert.deepEqual([...resolveCollapsedGroups(['Rooms'], ['Rooms'], undefined, undefined)], ['Rooms']);
+  });
+});
+
+describe('SubscriptionGuard', () => {
+  it('disposes a stale async subscription and keeps only the latest one', () => {
+    const guard = new SubscriptionGuard();
+    const disposed: string[] = [];
+    const first = guard.begin();
+    const second = guard.begin();
+
+    assert.equal(guard.accept(first, () => disposed.push('first')), false);
+    assert.equal(guard.accept(second, () => disposed.push('second')), true);
+    assert.deepEqual(disposed, ['first']);
+
+    guard.dispose();
+    assert.deepEqual(disposed, ['first', 'second']);
+  });
+});
+
 describe('HomeAssistantConfigProvider', () => {
   it('calls the expected websocket commands', async () => {
     const calls: Array<Record<string, unknown>> = [];
@@ -83,7 +200,7 @@ describe('HomeAssistantConfigProvider', () => {
     assert.equal(readResult.config?.bottom_items?.length, 0);
     assert.equal(readResult.last_modified, 1710000000);
     assert.equal((await provider.validate('bottom_items: []')).valid, true);
-    await provider.write('bottom_items: []');
+    await provider.write('bottom_items: []', 'revision-one');
 
     assert.deepEqual(
       calls.map((call) => call.type),
@@ -94,6 +211,7 @@ describe('HomeAssistantConfigProvider', () => {
         'sidebar_organizer/config/write',
       ]
     );
+    assert.equal(calls[3].expected_revision, 'revision-one');
   });
 
   it('returns unavailable info when the backend command is missing', async () => {
@@ -160,6 +278,11 @@ describe('HomeAssistantConfigProvider', () => {
 });
 
 describe('resolvePreferredConfigSource', () => {
+  it('treats shared and personal profiles as raw server YAML sources', () => {
+    assert.equal(isHomeAssistantConfigSource('home_assistant_config'), true);
+    assert.equal(isHomeAssistantConfigSource('home_assistant_profile'), true);
+    assert.equal(isHomeAssistantConfigSource('browser_storage'), false);
+  });
   it('uses Home Assistant config folder automatically when the backend is available', async () => {
     const source = await resolvePreferredConfigSource(
       {
@@ -245,9 +368,71 @@ describe('HomeAssistantProfileProvider', () => {
     assert.equal(calls[3].source, 'shared');
     assert.equal(calls[3].target_user_id, 'target-user');
   });
+
+  it('reads and writes server-synced preferences with revisions', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const provider = new HomeAssistantProfileProvider({
+      callWS: async (message: Record<string, unknown>) => {
+        calls.push(message);
+        return {
+          user_id: 'current',
+          preferences: { collapsed_groups: ['Rooms'] },
+          revision: 'next',
+        };
+      },
+    });
+
+    assert.deepEqual((await provider.readPreferences()).preferences.collapsed_groups, ['Rooms']);
+    await provider.writePreferences(['Admin'], 'previous', ['Rooms', 'Admin']);
+    assert.equal(calls[1].expected_revision, 'previous');
+    assert.deepEqual(calls[1].preferences, {
+      collapsed_groups: ['Admin'],
+      known_groups: ['Rooms', 'Admin'],
+    });
+  });
 });
 
 describe('user-scoped browser storage', () => {
+  it('uses different last-good cache keys for shared and personal sources', () => {
+    assert.notEqual(
+      getHaConfigCacheKey('home_assistant_config', 'user-one'),
+      getHaConfigCacheKey('home_assistant_profile', 'user-one')
+    );
+    assert.notEqual(
+      getHaConfigCacheKey('home_assistant_profile', 'user-one'),
+      getHaConfigCacheKey('home_assistant_profile', 'user-two')
+    );
+  });
+
+  it('migrates the legacy last-good HA cache into the active source cache', () => {
+    const values = new Map<string, string>([
+      ['sidebarOrganizerHaConfigCache', JSON.stringify({ bottom_items: ['energy'] })],
+    ]);
+    const previousWindow = globalThis.window;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem: (key: string) => values.get(key) ?? null,
+          setItem: (key: string, value: string) => values.set(key, value),
+          removeItem: (key: string) => values.delete(key),
+        },
+      },
+    });
+
+    try {
+      setActiveStorageUser('cache-user');
+
+      assert.deepEqual(getHaConfigCache('home_assistant_profile', 'cache-user'), {
+        bottom_items: ['energy'],
+      });
+      assert.equal(getStorage('sidebarOrganizerHaConfigCache'), null);
+      assert.notEqual(getStorage(getHaConfigCacheKey('home_assistant_profile', 'cache-user')), null);
+    } finally {
+      setActiveStorageUser(undefined);
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+    }
+  });
   it('isolates values and migrates an existing unscoped value once', () => {
     const values = new Map<string, string>([['sidebarOrganizerConfig', '{"legacy":true}']]);
     const previousWindow = globalThis.window;
@@ -273,10 +458,36 @@ describe('user-scoped browser storage', () => {
       assert.equal(getStorage('sidebarOrganizerConfig'), null);
       setStorage('sidebarOrganizerConfig', { personal: 2 });
 
-      assert.notEqual(
-        values.get('sidebarOrganizerConfig:user-one'),
-        values.get('sidebarOrganizerConfig:user-two')
-      );
+      assert.notEqual(values.get('sidebarOrganizerConfig:user-one'), values.get('sidebarOrganizerConfig:user-two'));
+    } finally {
+      setActiveStorageUser(undefined);
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+    }
+  });
+
+  it('fails safely when browser storage is corrupted', () => {
+    const values = new Map<string, string>();
+    const previousWindow = globalThis.window;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        localStorage: {
+          getItem: (key: string) => values.get(key) ?? null,
+          setItem: (key: string, value: string) => values.set(key, value),
+          removeItem: (key: string) => values.delete(key),
+        },
+      },
+    });
+
+    try {
+      setActiveStorageUser('broken-user');
+      values.set(getScopedStorageKey('sidebarOrganizerConfig'), '{broken');
+      values.set(getScopedStorageKey('sidebarHiddenPanels'), '{broken');
+      values.set(getScopedStorageKey('sidebarPanelOrder'), '{broken');
+
+      assert.equal(getStorageConfig(), undefined);
+      assert.deepEqual(getHiddenPanels(), []);
+      assert.equal(isStoragePanelEmpty(), true);
     } finally {
       setActiveStorageUser(undefined);
       Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
@@ -310,10 +521,7 @@ describe('Home Assistant panel validation severity', () => {
   });
 
   it('blocks ambiguous duplicate panel assignments', () => {
-    assert.equal(
-      hasBlockingConfigErrors({ config: {}, repeatedItems: ['energy'], valid: false }),
-      true
-    );
+    assert.equal(hasBlockingConfigErrors({ config: {}, repeatedItems: ['energy'], valid: false }), true);
   });
 });
 
