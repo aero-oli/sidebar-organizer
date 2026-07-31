@@ -1,3 +1,9 @@
+## [4.4.1](https://github.com/aero-oli/sidebar-organizer/compare/v4.4.0...v4.4.1) (2026-07-31)
+
+### Bug Fixes
+
+* synchronize integration release versions ([5e39747](https://github.com/aero-oli/sidebar-organizer/commit/5e39747ab42c15411874e2c021708a3288a02490))
+
 <a id="v2.1.2"></a>
 # [v2.1.2](https://github.com/ngocjohn/sidebar-organizer/releases/tag/v2.1.2) - 2025-08-12
 
