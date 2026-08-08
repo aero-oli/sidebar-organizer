@@ -4,13 +4,13 @@
 
 # 🗄️ Sidebar Organizer
 
-> ⚠️ **Important Notice** ⚠️
->
-> Sidebar Organizer **v4.0.0 and above** is compatible with **Home Assistant 2026.6.0 and newer**.
->
-> For older Home Assistant versions, use **Sidebar Organizer up to v3.4.1**
->
-> 🔒 If you rely on Sidebar Organizer, make sure you install the version that matches your Home Assistant release.
+An independently maintained Home Assistant integration for organizing, styling, and synchronizing the sidebar.
+
+> [!NOTE]
+> This repository is a fork of [ngocjohn/sidebar-organizer](https://github.com/ngocjohn/sidebar-organizer). It preserves the original project's visual sidebar organizer and editor while developing its own integration backend, per-user profiles, cross-device synchronization, safer configuration storage, and release path. Installations, releases, and issue tracking for this fork live in the [`aero-oli/sidebar-organizer`](https://github.com/aero-oli/sidebar-organizer) repository.
+
+> [!IMPORTANT]
+> Sidebar Organizer **v4.x requires Home Assistant 2026.6.0 or newer** and should be installed as an **Integration**, not as a Dashboard resource. For older Home Assistant releases, use Sidebar Organizer v3.4.1 or earlier.
 
 <table>
   <thead>
@@ -28,45 +28,58 @@
     </tr>
     <tr>
       <td>
-       <img src="https://raw.githubusercontent.com/ngocjohn/sidebar-organizer/refs/heads/main/assets/sidebar-default.png" />
+       <img src="assets/sidebar-default.png" />
       </td>
       <td>
-       <img src="https://raw.githubusercontent.com/ngocjohn/sidebar-organizer/refs/heads/main/assets/sidebar-organizer-anim.gif" />
+       <img src="assets/sidebar-organizer-anim.gif" />
       </td>
       <td>
-       <img src="https://raw.githubusercontent.com/ngocjohn/sidebar-organizer/refs/heads/main/assets/sidebar-light-theme.png" />
+       <img src="assets/sidebar-light-theme.png" />
       </td>
 			<td>
-       <img src="https://raw.githubusercontent.com/ngocjohn/sidebar-organizer/refs/heads/main/assets/sidebar-items-expanded.png" />
+       <img src="assets/sidebar-items-expanded.png" />
       </td>
     </tr>
   </tbody>
 </table>
 
-## Introduction
+## What this project is now
 
-**Sidebar Organizer** is a custom Home Assistant integration designed to give you full control over the layout and organization of the sidebar. It allows you to customize the appearance, group items, and reorder or collapse items for a cleaner, more intuitive navigation experience.
+Sidebar Organizer started as a fork of the original frontend plugin. Version 4 has grown into a full Home Assistant custom integration with an authenticated backend and a frontend editor. It still makes the sidebar easier to organize, but its configuration can now live safely in Home Assistant's private config directory and follow users across browsers and devices.
 
-With Sidebar Organizer, managing the sidebar in Home Assistant becomes easy and flexible. Whether you want to declutter your sidebar or create a more streamlined view, Sidebar Organizer is here to help.
+The original project remains the foundation of the sidebar UI and is credited below. This fork is maintained and released independently, so feature requests and bug reports for the behavior documented here should be opened on [this fork's issue tracker](https://github.com/aero-oli/sidebar-organizer/issues).
 
-## Features
+## Current features
 
-- **Customize Sidebar Appearance**: Personalize the look of your sidebar with custom styles, colors, and layouts.
-- **Group Menu Items**: Organize sidebar items into specific groups for better clarity and separation of content.
-- **Reorder Items**: Drag and drop to reorder items within groups or across the sidebar.
-- **Expand/Collapse Groups**: Expand or collapse groups of items to save space and minimize clutter.
-- **Manage Bottom Items**: Move specific items to the bottom of the sidebar for quick access.
-- **Default Collapse Settings**: Choose which groups of items should be collapsed by default for a cleaner view.
+- **Native Home Assistant integration**: Installs through HACS as an integration, uses config and options flows, and loads its frontend automatically.
+- **Private YAML configuration**: Stores the shared configuration below `/config` instead of exposing it through `/config/www`.
+- **Per-user profiles**: Gives individual Home Assistant users an optional personal sidebar with the shared configuration as a fallback.
+- **Cross-device synchronization**: Broadcasts shared config, profile, and collapsed-group changes to connected browsers; manual YAML edits are detected without browser polling.
+- **Safer editing**: Validates YAML and schema, rejects stale concurrent writes, writes atomically, keeps previous-version backups, and preserves a user-scoped last-good cache.
+- **Visual and raw editors**: Supports drag-and-drop organization, YAML editing, validation, source diagnostics, and administrator profile management in one dialog.
+- **Flexible organization**: Groups, reorders, hides, pins, collapses, and moves items into bottom sections or bottom groups.
+- **Appearance controls**: Customizes sidebar colors, width, typography, dividers, header behavior, and light/dark presentation.
+- **New and conditional items**: Adds sidebar entries and supports visibility configuration for more tailored navigation.
 
-# Installation
+## How configuration works
 
-## [HACS](https://hacs.xyz) (Home Assistant Community Store)
+With the integration installed, Sidebar Organizer resolves configuration in this order:
+
+1. The signed-in user's personal profile, when one exists.
+2. The shared YAML configuration managed by the integration.
+3. A user-scoped last-good cache if the current server configuration cannot be loaded safely.
+
+Browser storage and static `/local/sidebar-organizer.yaml` files remain available only as compatibility and migration paths for legacy frontend-only installations. See [Architecture](docs/architecture.md) for the design and trust boundaries.
+
+## Installation
+
+### Recommended: [HACS](https://hacs.xyz)
 
 If you have not disabled [My Home Assistant], click the button below to add this repository to HACS as an integration. Otherwise, add `aero-oli/sidebar-organizer` manually as a custom repository with category `Integration`.
 
 [![open-hacs-repo-badge]][hacs-repo-custom-url]
 
-### Install the integration
+#### Install the integration
 
 1. Add `aero-oli/sidebar-organizer` to HACS as category `Integration`.
 1. Install Sidebar Organizer.
@@ -93,7 +106,7 @@ sidebar_organizer:
 
 `config_path` and `profiles_path` are resolved under the Home Assistant config directory. You can also use subdirectories such as `configs/sidebar-organizer.yaml` and `configs/sidebar-organizer-profiles`.
 
-## Manual integration install
+### Manual integration install
 
 <details>
   <summary>Click to expand manual integration installation instructions</summary>
@@ -105,15 +118,19 @@ sidebar_organizer:
 
 </details>
 
-## Legacy manual frontend install
+### Migrating from a legacy frontend install
 
 <details>
-  <summary>Click to expand legacy frontend-only installation instructions</summary>
+  <summary>Click to expand legacy frontend-only installation and migration notes</summary>
 
-1. Download the [sidebar-organizer.js].
+The v4 integration is the supported installation for current Home Assistant releases. After installing it, remove the old Dashboard resource or `frontend.extra_module_url` entry so Home Assistant does not load Sidebar Organizer twice. Your existing browser or `/local` configuration can then be migrated through the Sidebar Organizer dialog.
+
+If you deliberately need the legacy frontend-only version for an older Home Assistant release:
+
+1. Download `sidebar-organizer.js` from the [v3.4.1 release].
 2. Place the downloaded file on your Home Assistant machine in the `config/www` folder (when there is no `www` folder in the folder where your `configuration.yaml` file is, create it and place the file there).
-3. Add the url of the plugin as an extra_module_url in your configuration.yaml:
-4. Restart Home Assistant
+3. Add the URL of the plugin as an `extra_module_url` in `configuration.yaml`.
+4. Restart Home Assistant.
 
 ```yaml
 frontend:
@@ -128,17 +145,17 @@ The legacy frontend-only install supports browser storage and `/local/sidebar-or
 
 </details>
 
-# Usage
+## Usage
 
-## Configuration dialog
+### Configuration dialog
 
-- Access the **Sidebar Organizer** Configuration menu by press and hold the Profile menu (the last item in the sidebar) or via the profile page.
+- Open the **Sidebar Organizer** configuration dialog by pressing and holding the Profile menu (the last item in the sidebar), or from the profile page.
   ![Configuration Section](assets/sidebar-config-section.png)
-- The settings menu is divided into three categories: Appearance, Panels, and Raw Code. Below is a breakdown of what you can customize in each section.
+- The settings overview links to Settings, Appearance, Panels, and New Items. The dialog also provides a raw YAML editor for the current shared or personal configuration.
 
   ![Configuration Dialog](assets/config-dialog.gif)
 
-### Appearance
+#### Appearance
 
 - **Header Title**: Change the header title.
 - **Hide Header Toggle**: A button that allows you to quickly toggle between expanding or collapsing the sidebar groups.
@@ -180,7 +197,7 @@ You can set different styles for **Light** and **Dark** modes by specifying the 
 
   </details>
 
-### Panels
+#### Panels
 
 In this section, you can organize the layout of the sidebar panels by customizing how items are displayed. The following options are available:
 
@@ -206,10 +223,10 @@ In this section, you can organize the layout of the sidebar panels by customizin
       </tr>
       <tr>
         <td>
-        <img src="https://raw.githubusercontent.com/ngocjohn/sidebar-organizer/refs/heads/main/assets/config-bottom-panel.png" />
+        <img src="assets/config-bottom-panel.png" />
         </td>
         <td>
-        <img src="https://raw.githubusercontent.com/ngocjohn/sidebar-organizer/refs/heads/main/assets/config-groups-sort.gif" />
+        <img src="assets/config-groups-sort.gif" />
         </td>
       </tr>
       <tr>
@@ -219,7 +236,7 @@ In this section, you can organize the layout of the sidebar panels by customizin
       </tr>
         <tr>
         <td colspan="2">
-        <img src="https://raw.githubusercontent.com/ngocjohn/sidebar-organizer/refs/heads/main/assets/config-group-items.gif" />
+        <img src="assets/config-group-items.gif" />
         </td>
       </tr>
     </tbody>
@@ -269,7 +286,7 @@ In this section, you can organize the layout of the sidebar panels by customizin
 
   </details>
 
-### Code
+#### Raw YAML
 
 - This section lets you edit the raw YAML configuration used by Sidebar Organizer. You can also download the current configuration as a YAML file.
 
@@ -290,9 +307,18 @@ In this section, you can organize the layout of the sidebar panels by customizin
 
   ![Config RAW Code](assets/config-raw-code.png)
 
-## Home Assistant config-folder mode
+### Storage, profiles, and synchronization
 
-When the Sidebar Organizer backend integration is available, Sidebar Organizer calls the backend WebSocket API:
+The shared YAML file is the fallback source of truth. Personal profiles are stored under `/config/sidebar-organizer-profiles/<user-id>.yaml` and take precedence for that user on every browser and device. Browser storage may keep a user-scoped last-good cache, but it is not treated as the source of truth.
+
+Administrators can select any active Home Assistant user in the Sidebar Organizer dialog, create a profile from the shared default, copy another profile, edit it, or reset it. Deleted-user profiles are retained as orphaned files until an administrator removes them. Set `allow_user_write: true` if non-admin users should be allowed to edit their own profile; it defaults to `false`.
+
+Profile and shared-config changes are broadcast to connected devices. A single backend watcher also detects manual YAML edits, so browsers do not poll the filesystem. Clean editors reload automatically, while an editor with unsaved changes asks before replacing them. Collapsed groups are stored as separate per-user preferences and sync across devices.
+
+<details>
+  <summary>WebSocket API reference</summary>
+
+When the Sidebar Organizer backend integration is available, the frontend uses these authenticated Home Assistant WebSocket commands:
 
 - `sidebar_organizer/config/info`
 - `sidebar_organizer/config/read`
@@ -309,11 +335,7 @@ When the Sidebar Organizer backend integration is available, Sidebar Organizer c
 - `sidebar_organizer/preferences/read`
 - `sidebar_organizer/preferences/write`
 
-The shared YAML file is the fallback source of truth. Personal profiles are stored under `/config/sidebar-organizer-profiles/<user-id>.yaml` and take precedence for that user on every browser and device. Browser storage may keep a user-scoped last-good cache, but it is not treated as the source of truth.
-
-Administrators can select any active Home Assistant user in the Sidebar Organizer dialog, create a profile from the shared default, copy another profile, edit it, or reset it. Deleted-user profiles are retained as orphaned files until an administrator removes them. Set `allow_user_write: true` if non-admin users should be allowed to edit their own profile; it defaults to `false`.
-
-Profile and shared-config changes are broadcast to connected devices. A single backend watcher also detects manual YAML edits, so browsers do not poll the filesystem. Clean editors reload automatically, while an editor with unsaved changes asks before replacing them. Collapsed groups are stored as separate per-user preferences and sync across devices.
+</details>
 
 Example `/config/sidebar-organizer.yaml`:
 
@@ -350,7 +372,7 @@ Security notes:
 - `config_path` and `profiles_path` are validated server-side and must resolve inside the Home Assistant config directory.
 - Shared and profile writes use atomic replacement, previous-version backups, size limits, and content revisions to reject stale concurrent edits.
 
-## Troubleshooting
+### Troubleshooting
 
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
@@ -364,7 +386,8 @@ Security notes:
 | Stale frontend after update | Browser or Home Assistant frontend cache | Hard refresh, clear HA frontend cache, and remove old Dashboard resources |
 | Invalid YAML | YAML parses incorrectly or uses unsupported field shapes | Use Validate YAML and compare with the schema document |
 
-Manual test checklist:
+<details>
+  <summary>Manual test checklist for contributors</summary>
 
 1. Build frontend: `pnpm install` then `pnpm run build`.
 2. Install the release through HACS as an `Integration`, or copy `custom_components/sidebar_organizer` to `/config/custom_components/sidebar_organizer`.
@@ -380,11 +403,11 @@ Manual test checklist:
 12. Change the YAML file manually and reload from the UI or wait for the external-change prompt.
 13. Confirm invalid YAML shows an error and does not break the sidebar.
 
+</details>
+
 ---
 
-&copy; 2025 Viet Ngoc
-
-[https://github.com/ngocjohn/](https://github.com/ngocjohn/)
+Sidebar Organizer was originally created by [Viet Ngoc (`ngocjohn`)](https://github.com/ngocjohn). This independently maintained fork is developed by [Oliver Verity (`aero-oli`)](https://github.com/aero-oli) and continues under the [MIT License](LICENSE).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -408,4 +431,4 @@ Manual test checklist:
 [dashboard-resources-link]: https://my.home-assistant.io/redirect/lovelace_resources/
 [open-hacs-repo-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
 [hacs-repo-custom-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=aero-oli&repository=sidebar-organizer&category=integration
-[sidebar-organizer.js]: https://github.com/aero-oli/sidebar-organizer/releases/latest
+[v3.4.1 release]: https://github.com/ngocjohn/sidebar-organizer/releases/tag/v3.4.1
