@@ -82,6 +82,14 @@ export class HomeAssistantProfileProvider {
     );
   }
 
+  async restore(expectedRevision?: string | null): Promise<ProfileConfigInfo> {
+    return await this.hass.callWS<ProfileConfigInfo>(
+      this._message('sidebar_organizer/profile/restore', {
+        expected_revision: expectedRevision ?? null,
+      })
+    );
+  }
+
   async list(): Promise<SidebarProfileList> {
     return await this.hass.callWS<SidebarProfileList>({ type: 'sidebar_organizer/profile/list' });
   }
@@ -110,13 +118,15 @@ export class HomeAssistantProfileProvider {
   async writePreferences(
     collapsedGroups: string[],
     expectedRevision?: string | null,
-    knownGroups?: string[]
+    knownGroups?: string[],
+    syncCollapsedGroups?: boolean
   ): Promise<SidebarPreferencesEnvelope> {
     return await this.hass.callWS<SidebarPreferencesEnvelope>(
       this._message('sidebar_organizer/preferences/write', {
         preferences: {
           collapsed_groups: collapsedGroups,
           ...(knownGroups ? { known_groups: knownGroups } : {}),
+          ...(syncCollapsedGroups === undefined ? {} : { sync_collapsed_groups: syncCollapsedGroups }),
         },
         expected_revision: expectedRevision ?? null,
       })

@@ -22,6 +22,7 @@ validate_yaml_config = helpers.validate_yaml_config
 frontend_module_url = helpers.frontend_module_url
 file_revision = helpers.file_revision
 file_metadata = getattr(helpers, "file_metadata", None)
+file_metadata_with_backup = getattr(helpers, "file_metadata_with_backup", None)
 normalize_options = getattr(helpers, "normalize_options", None)
 profile_path = getattr(helpers, "profile_path", None)
 resolve_profiles_path = getattr(helpers, "resolve_profiles_path", None)
@@ -31,6 +32,9 @@ write_preferences = getattr(helpers, "write_preferences", None)
 validate_config_object = getattr(helpers, "validate_config_object", None)
 has_revision_conflict = getattr(helpers, "has_revision_conflict", None)
 merge_watch_revisions = getattr(helpers, "merge_watch_revisions", None)
+prepare_storage_paths = getattr(helpers, "prepare_storage_paths", None)
+profile_directory_metadata = getattr(helpers, "profile_directory_metadata", None)
+validate_storage_paths = getattr(helpers, "validate_storage_paths", None)
 
 
 class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
@@ -63,6 +67,7 @@ class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
         self.assertFalse(has_revision_conflict(None, None))
         self.assertTrue(has_revision_conflict("old", "new"))
         self.assertTrue(has_revision_conflict(None, "existing"))
+
     def test_shared_schema_fixtures(self) -> None:
         fixtures_path = ROOT / "tests" / "fixtures" / "config-validation.json"
         fixtures = json.loads(fixtures_path.read_text("utf-8"))
@@ -80,6 +85,7 @@ class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
         self.assertEqual(options["profiles_path"], "sidebar-organizer-profiles")
         self.assertEqual(options["allow_write"], True)
         self.assertEqual(options["allow_user_write"], False)
+        self.assertEqual(options["allow_preference_write"], True)
         self.assertEqual(options["create_if_missing"], True)
 
     def test_normalize_options_preserves_explicit_values(self) -> None:
@@ -89,6 +95,7 @@ class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
                 "profiles_path": "configs/sidebar-organizer-profiles",
                 "allow_write": False,
                 "allow_user_write": True,
+                "allow_preference_write": False,
                 "create_if_missing": False,
             }
         )
@@ -96,6 +103,7 @@ class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
         self.assertEqual(options["config_path"], "configs/sidebar-organizer.yaml")
         self.assertEqual(options["allow_write"], False)
         self.assertEqual(options["allow_user_write"], True)
+        self.assertEqual(options["allow_preference_write"], False)
         self.assertEqual(options["create_if_missing"], False)
 
     def test_resolve_config_path_accepts_relative_path_inside_config(self) -> None:
@@ -123,6 +131,57 @@ class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
 
             with self.assertRaises(ValueError):
                 resolve_profiles_path(tmpdir, "../profiles")
+
+    def test_storage_paths_require_a_dedicated_non_overlapping_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaises(ValueError):
+                validate_storage_paths(tmpdir, "sidebar-organizer.yaml", ".")
+            with self.assertRaises(ValueError):
+                validate_storage_paths(
+                    tmpdir,
+                    "sidebar-organizer-profiles/shared.yaml",
+                    "sidebar-organizer-profiles",
+                )
+
+            config_path, profiles_path = validate_storage_paths(
+                tmpdir, "sidebar-organizer.yaml", "sidebar-organizer-profiles"
+            )
+            self.assertEqual(config_path.parent, Path(tmpdir).resolve())
+            self.assertEqual(profiles_path.parent, Path(tmpdir).resolve())
+
+    def test_prepare_storage_paths_claims_only_safe_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir)
+            config_path = base / "sidebar-organizer.yaml"
+            profiles_path = base / "sidebar-organizer-profiles"
+            prepare_storage_paths(config_path, profiles_path)
+
+            self.assertTrue((profiles_path / ".sidebar-organizer-profiles").is_file())
+            self.assertTrue(profile_directory_metadata(profiles_path)["owned"])
+
+            unsafe = base / "packages"
+            unsafe.mkdir()
+            (unsafe / "configuration.yaml").write_text("homeassistant:\n", "utf-8")
+            with self.assertRaises(ValueError):
+                prepare_storage_paths(config_path, unsafe)
+
+    def test_profile_directory_lists_only_safe_yaml_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profiles_path = Path(tmpdir) / "sidebar-organizer-profiles"
+            prepare_storage_paths(
+                Path(tmpdir) / "sidebar-organizer.yaml", profiles_path
+            )
+            (profiles_path / "user-one.yaml").write_text("bottom_items: []\n", "utf-8")
+            (profiles_path / "user-one.yaml.bak").write_text(
+                "bottom_items: []\n", "utf-8"
+            )
+            (profiles_path / "not a profile.yaml").write_text(
+                "bottom_items: []\n", "utf-8"
+            )
+
+            self.assertEqual(
+                profile_directory_metadata(profiles_path)["profile_ids"], ["user-one"]
+            )
 
     def test_profile_path_uses_safe_stable_user_id(self) -> None:
         profiles_dir = Path("/config/sidebar-organizer-profiles")
@@ -190,14 +249,25 @@ default_collapsed: {}
     def test_preferences_round_trip_and_validation(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = preferences_path(Path(tmpdir), "user-one")
-            self.assertEqual(read_preferences(path), {"collapsed_groups": []})
+            self.assertEqual(
+                read_preferences(path),
+                {"collapsed_groups": [], "sync_collapsed_groups": True},
+            )
             write_preferences(
                 path,
-                {"collapsed_groups": ["Rooms"], "known_groups": ["Rooms", "Admin"]},
+                {
+                    "collapsed_groups": ["Rooms"],
+                    "known_groups": ["Rooms", "Admin"],
+                    "sync_collapsed_groups": False,
+                },
             )
             self.assertEqual(
                 read_preferences(path),
-                {"collapsed_groups": ["Rooms"], "known_groups": ["Rooms", "Admin"]},
+                {
+                    "collapsed_groups": ["Rooms"],
+                    "sync_collapsed_groups": False,
+                    "known_groups": ["Rooms", "Admin"],
+                },
             )
             with self.assertRaises(ValueError):
                 write_preferences(path, {"collapsed_groups": "Rooms"})
@@ -242,6 +312,28 @@ default_collapsed: {}
             second = file_metadata(path)
 
         self.assertNotEqual(first["revision"], second["revision"])
+
+    def test_file_metadata_reports_adjacent_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "profile.yaml"
+            atomic_write_text(path, "bottom_items: []\n")
+            atomic_write_with_backup(path, "bottom_items:\n  - energy\n")
+
+            metadata = file_metadata_with_backup(path)
+
+        self.assertTrue(metadata["backup_exists"])
+        self.assertIsNotNone(metadata["backup_revision"])
+
+    def test_file_metadata_ignores_invalid_backup_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "profile.yaml"
+            atomic_write_text(path, "bottom_items: []\n")
+            path.with_suffix(".yaml.bak").mkdir()
+
+            metadata = file_metadata_with_backup(path)
+
+        self.assertFalse(metadata["backup_exists"])
+        self.assertIsNone(metadata["backup_revision"])
 
 
 if __name__ == "__main__":

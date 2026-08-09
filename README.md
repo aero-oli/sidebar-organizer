@@ -98,13 +98,16 @@ sidebar_organizer:
   profiles_path: sidebar-organizer-profiles
   allow_write: true
   allow_user_write: false
+  allow_preference_write: true
   create_if_missing: true
 ```
 
 > [!IMPORTANT]
 > If you previously installed Sidebar Organizer as a HACS Dashboard/frontend plugin, remove the old Dashboard resource and remove any `frontend.extra_module_url` entry for `/hacsfiles/sidebar-organizer/sidebar-organizer.js` or `/local/sidebar-organizer.js`. Loading both the old plugin resource and the new integration module can register the same custom elements twice.
 
-`config_path` and `profiles_path` are resolved under the Home Assistant config directory. You can also use subdirectories such as `configs/sidebar-organizer.yaml` and `configs/sidebar-organizer-profiles`.
+`config_path` and `profiles_path` are resolved under the Home Assistant config directory. The profiles path must be a dedicated Sidebar Organizer directory; the config root, overlapping paths, non-directories, and non-empty unowned custom directories are rejected. Sidebar Organizer places a `.sidebar-organizer-profiles` ownership marker in the directory before it will enumerate or modify profile YAML. You can use subdirectories such as `configs/sidebar-organizer.yaml` and `configs/sidebar-organizer-profiles`.
+
+When YAML setup is used, later changes to this block are reconciled into the existing config entry on restart. Changing a storage path does not move old files automatically; move them deliberately or restore the previous option before saving.
 
 ### Manual integration install
 
@@ -313,7 +316,11 @@ The shared YAML file is the fallback source of truth. Personal profiles are stor
 
 Administrators can select any active Home Assistant user in the Sidebar Organizer dialog, create a profile from the shared default, copy another profile, edit it, or reset it. Deleted-user profiles are retained as orphaned files until an administrator removes them. Set `allow_user_write: true` if non-admin users should be allowed to edit their own profile; it defaults to `false`.
 
-Profile and shared-config changes are broadcast to connected devices. A single backend watcher also detects manual YAML edits, so browsers do not poll the filesystem. Clean editors reload automatically, while an editor with unsaved changes asks before replacing them. Collapsed groups are stored as separate per-user preferences and sync across devices.
+`allow_write` controls shared and personal YAML changes. `allow_preference_write` separately controls per-user preference synchronization and defaults to `true`, so installations can keep configuration read-only while still syncing collapsed groups. Each user can also choose whether collapsed groups follow them across devices or remain local to each browser.
+
+Profile and shared-config changes are broadcast to connected devices. A single backend watcher also detects manual YAML edits, so browsers do not poll the filesystem. Clean editors reload automatically, while an editor with unsaved changes asks before replacing them. Saved changes are reapplied through the serialized runtime pipeline without requiring a full browser reload.
+
+The settings dialog reports whether a previous YAML version is available and can restore it after confirmation. Restoring swaps the current and previous versions, so the operation remains reversible.
 
 <details>
   <summary>WebSocket API reference</summary>
@@ -324,11 +331,13 @@ When the Sidebar Organizer backend integration is available, the frontend uses t
 - `sidebar_organizer/config/read`
 - `sidebar_organizer/config/validate`
 - `sidebar_organizer/config/write`
+- `sidebar_organizer/config/restore`
 - `sidebar_organizer/config/subscribe`
 - `sidebar_organizer/profile/list`
 - `sidebar_organizer/profile/info`
 - `sidebar_organizer/profile/read`
 - `sidebar_organizer/profile/write`
+- `sidebar_organizer/profile/restore`
 - `sidebar_organizer/profile/delete`
 - `sidebar_organizer/profile/copy`
 - `sidebar_organizer/profile/subscribe`
@@ -366,10 +375,11 @@ Security notes:
 - Do not put secrets in `sidebar-organizer.yaml`.
 - Do not place the private config-folder file under `/config/www`.
 - `/config/www` is served as `/local`; the backend mode deliberately does not register the YAML file as a static path.
-- All write operations require `allow_write: true`; shared-config writes are administrator-only.
+- Shared and profile YAML operations require `allow_write: true`; shared-config writes are administrator-only.
+- Preference synchronization requires `allow_preference_write: true` and is independently configurable.
 - Non-admin users can write only their own profile, and only when `allow_user_write: true`.
 - A non-admin user can access only their own profile; target users are resolved and authorized server-side.
-- `config_path` and `profiles_path` are validated server-side and must resolve inside the Home Assistant config directory.
+- `config_path` and `profiles_path` are validated server-side, must resolve inside the Home Assistant config directory, may not overlap, and the profile directory must be integration-owned.
 - Shared and profile writes use atomic replacement, previous-version backups, size limits, and content revisions to reject stale concurrent edits.
 
 ### Troubleshooting

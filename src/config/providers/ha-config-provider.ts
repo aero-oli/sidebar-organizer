@@ -82,6 +82,13 @@ export class HomeAssistantConfigProvider implements SidebarConfigProvider {
     });
   }
 
+  async restore(expectedRevision?: string | null): Promise<ConfigProviderInfo> {
+    return await this.hass.callWS<ConfigProviderInfo>({
+      type: 'sidebar_organizer/config/restore',
+      expected_revision: expectedRevision ?? null,
+    });
+  }
+
   async subscribe(callback: (info: ConfigProviderInfo) => void): Promise<() => void> {
     const connection = (
       this.hass as HassWithCallWS & {

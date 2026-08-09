@@ -15,6 +15,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from .const import (
     CONF_ALLOW_WRITE,
     CONF_ALLOW_USER_WRITE,
+    CONF_ALLOW_PREFERENCE_WRITE,
     CONF_CONFIG_PATH,
     CONF_CREATE_IF_MISSING,
     CONF_PROFILES_PATH,
@@ -33,9 +34,12 @@ from .helpers import (
     atomic_write_text,
     atomic_write_with_backup,
     file_metadata,
+    file_metadata_with_backup,
+    file_revision,
     frontend_module_url,
     has_revision_conflict,
     merge_watch_revisions,
+    profile_directory_metadata,
     preferences_path,
     profile_path,
     read_preferences,
@@ -48,6 +52,7 @@ TYPE_INFO = f"{DOMAIN}/config/info"
 TYPE_READ = f"{DOMAIN}/config/read"
 TYPE_VALIDATE = f"{DOMAIN}/config/validate"
 TYPE_WRITE = f"{DOMAIN}/config/write"
+TYPE_RESTORE = f"{DOMAIN}/config/restore"
 TYPE_SUBSCRIBE = f"{DOMAIN}/config/subscribe"
 TYPE_PROFILE_DELETE = f"{DOMAIN}/profile/delete"
 TYPE_PROFILE_COPY = f"{DOMAIN}/profile/copy"
@@ -56,6 +61,7 @@ TYPE_PROFILE_LIST = f"{DOMAIN}/profile/list"
 TYPE_PROFILE_READ = f"{DOMAIN}/profile/read"
 TYPE_PROFILE_SUBSCRIBE = f"{DOMAIN}/profile/subscribe"
 TYPE_PROFILE_WRITE = f"{DOMAIN}/profile/write"
+TYPE_PROFILE_RESTORE = f"{DOMAIN}/profile/restore"
 TYPE_PREFERENCES_READ = f"{DOMAIN}/preferences/read"
 TYPE_PREFERENCES_WRITE = f"{DOMAIN}/preferences/write"
 REGISTERED_KEY = f"{DOMAIN}_websocket_registered"
@@ -72,6 +78,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_read)
     websocket_api.async_register_command(hass, websocket_validate)
     websocket_api.async_register_command(hass, websocket_write)
+    websocket_api.async_register_command(hass, websocket_restore)
     websocket_api.async_register_command(hass, websocket_subscribe)
     websocket_api.async_register_command(hass, websocket_profile_delete)
     websocket_api.async_register_command(hass, websocket_profile_copy)
@@ -80,6 +87,7 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_profile_read)
     websocket_api.async_register_command(hass, websocket_profile_subscribe)
     websocket_api.async_register_command(hass, websocket_profile_write)
+    websocket_api.async_register_command(hass, websocket_profile_restore)
     websocket_api.async_register_command(hass, websocket_preferences_read)
     websocket_api.async_register_command(hass, websocket_preferences_write)
 
@@ -90,6 +98,18 @@ async def websocket_diagnostics(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Return install and runtime diagnostics."""
+    directory = await hass.async_add_executor_job(
+        profile_directory_metadata, _profiles_path(hass)
+    )
+    storage_health = {
+        "profile_directory_owned": directory["owned"],
+        "watcher_active": CONFIG_WATCH_STATE in hass.data[DOMAIN],
+        **(
+            {"profile_count": len(directory["profile_ids"])}
+            if connection.user.is_admin
+            else {}
+        ),
+    }
     connection.send_result(
         msg["id"],
         {
@@ -100,6 +120,7 @@ async def websocket_diagnostics(
                 FRONTEND_URL_KEY, frontend_module_url(FRONTEND_VERSION)
             ),
             "legacy_resource_hint": "/hacsfiles/sidebar-organizer/sidebar-organizer.js",
+            "storage_health": storage_health,
         },
     )
 
@@ -111,7 +132,8 @@ async def websocket_info(
 ) -> None:
     """Return backend config mode metadata."""
     connection.send_result(
-        msg["id"], {**(await _async_metadata(hass)), "capabilities": _capabilities(connection)}
+        msg["id"],
+        {**(await _async_metadata(hass)), "capabilities": _capabilities(connection)},
     )
 
 
@@ -124,7 +146,7 @@ async def websocket_read(
     path = _path(hass)
     settings = hass.data[DOMAIN]
 
-    if not path.exists():
+    if not await hass.async_add_executor_job(path.exists):
         if settings[CONF_CREATE_IF_MISSING]:
             await hass.async_add_executor_job(
                 atomic_write_text, path, DEFAULT_CONFIG_YAML
@@ -238,9 +260,8 @@ async def websocket_write(
         current_revision = await hass.async_add_executor_job(
             lambda: file_metadata(_path(hass))["revision"]
         )
-        if (
-            "expected_revision" in msg
-            and has_revision_conflict(msg["expected_revision"], current_revision)
+        if "expected_revision" in msg and has_revision_conflict(
+            msg["expected_revision"], current_revision
         ):
             connection.send_error(
                 msg["id"],
@@ -252,6 +273,34 @@ async def websocket_write(
             atomic_write_with_backup, _path(hass), msg["yaml"]
         )
         await _async_refresh_watch_state(hass, _path(hass))
+    metadata = await _async_metadata(hass)
+    connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
+    _notify_config_subscribers(hass, metadata, exclude_connection=connection)
+    await _notify_shared_profile_subscribers(hass, connection)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): TYPE_RESTORE,
+        vol.Optional("expected_revision"): vol.Any(str, None),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_restore(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Restore the adjacent shared-config backup after validation."""
+    if not hass.data[DOMAIN][CONF_ALLOW_WRITE]:
+        connection.send_error(
+            msg["id"], "write_disabled", "Writing Sidebar Organizer config is disabled."
+        )
+        return
+    target = _path(hass)
+    if not await _async_restore_backup(
+        hass, connection, msg, target, "shared configuration"
+    ):
+        return
     metadata = await _async_metadata(hass)
     connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
     _notify_config_subscribers(hass, metadata, exclude_connection=connection)
@@ -309,8 +358,8 @@ async def websocket_profile_read(
         return
 
     await _ensure_default_config(hass)
-    path, _source = _effective_profile_path(hass, user_id)
-    if not path.exists():
+    path, _source = await _async_effective_profile_path(hass, user_id)
+    if not await hass.async_add_executor_job(path.exists):
         connection.send_error(
             msg["id"],
             "file_missing",
@@ -384,7 +433,7 @@ async def websocket_profile_write(
     lock = hass.data[DOMAIN][PROFILE_LOCK]
     async with lock:
         await _ensure_default_config(hass)
-        effective_path, _source = _effective_profile_path(hass, user_id)
+        effective_path, _source = await _async_effective_profile_path(hass, user_id)
         current_revision = await hass.async_add_executor_job(
             lambda: file_metadata(effective_path)["revision"]
         )
@@ -399,11 +448,38 @@ async def websocket_profile_write(
             return
 
         target = _personal_profile_path(hass, user_id)
-        await hass.async_add_executor_job(
-            atomic_write_with_backup, target, msg["yaml"]
-        )
+        await hass.async_add_executor_job(atomic_write_with_backup, target, msg["yaml"])
         await _async_refresh_watch_state(hass, target)
 
+    metadata = await _async_profile_metadata(hass, connection, user_id)
+    connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
+    _notify_profile_subscribers(hass, user_id, metadata, exclude_connection=connection)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): TYPE_PROFILE_RESTORE,
+        vol.Optional("user_id"): str,
+        vol.Optional("expected_revision"): vol.Any(str, None),
+    }
+)
+@websocket_api.async_response
+async def websocket_profile_restore(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Restore the adjacent backup for an existing personal profile."""
+    user_id = await _resolve_target_user(
+        hass, connection, msg.get("user_id"), msg["id"], allow_orphan=True
+    )
+    if user_id is None or not _check_profile_write_permission(
+        hass, connection, user_id, msg["id"]
+    ):
+        return
+    target = _personal_profile_path(hass, user_id)
+    if not await _async_restore_backup(
+        hass, connection, msg, target, "personal profile"
+    ):
+        return
     metadata = await _async_profile_metadata(hass, connection, user_id)
     connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
     _notify_profile_subscribers(hass, user_id, metadata, exclude_connection=connection)
@@ -444,7 +520,7 @@ async def websocket_profile_delete(
                 "The Sidebar Organizer profile changed after it was loaded.",
             )
             return
-        if target.exists():
+        if await hass.async_add_executor_job(target.exists):
             await hass.async_add_executor_job(target.unlink)
             await _async_refresh_watch_state(hass, target)
 
@@ -489,7 +565,7 @@ async def websocket_profile_copy(
                 msg["id"], "invalid_user_id", "The source profile id is invalid."
             )
             return
-        if not source_path.exists():
+        if not await hass.async_add_executor_job(source_path.exists):
             connection.send_error(
                 msg["id"], "profile_missing", "The source profile does not exist."
             )
@@ -498,12 +574,14 @@ async def websocket_profile_copy(
     lock = hass.data[DOMAIN][PROFILE_LOCK]
     async with lock:
         await _ensure_default_config(hass)
-        if not source_path.exists():
+        if not await hass.async_add_executor_job(source_path.exists):
             connection.send_error(
                 msg["id"], "file_missing", "The source configuration file is missing."
             )
             return
-        target_effective, _target_source = _effective_profile_path(hass, target_user_id)
+        target_effective, _target_source = await _async_effective_profile_path(
+            hass, target_user_id
+        )
         current_revision = await hass.async_add_executor_job(
             lambda: file_metadata(target_effective)["revision"]
         )
@@ -531,9 +609,7 @@ async def websocket_profile_copy(
             )
             return
         target = _personal_profile_path(hass, target_user_id)
-        await hass.async_add_executor_job(
-            atomic_write_with_backup, target, yaml_text
-        )
+        await hass.async_add_executor_job(atomic_write_with_backup, target, yaml_text)
         await _async_refresh_watch_state(hass, target)
 
     metadata = await _async_profile_metadata(hass, connection, target_user_id)
@@ -551,13 +627,11 @@ async def websocket_profile_list(
 ) -> None:
     """List active users and orphaned Sidebar Organizer profiles for administrators."""
     users = await hass.auth.async_get_users()
-    profiles_dir = _profiles_path(hass)
     active_ids = {user.id for user in users}
-    profile_ids = (
-        {path.stem for path in profiles_dir.glob("*.yaml") if path.is_file()}
-        if profiles_dir.exists()
-        else set()
+    directory = await hass.async_add_executor_job(
+        profile_directory_metadata, _profiles_path(hass)
     )
+    profile_ids = set(directory["profile_ids"])
     connection.send_result(
         msg["id"],
         {
@@ -592,9 +666,9 @@ async def websocket_profile_subscribe(
         return
 
     subscriber_key = (id(connection), msg["id"])
-    hass.data[DOMAIN][PROFILE_SUBSCRIBERS].setdefault(user_id, {})[
-        subscriber_key
-    ] = connection
+    hass.data[DOMAIN][PROFILE_SUBSCRIBERS].setdefault(user_id, {})[subscriber_key] = (
+        connection
+    )
 
     def unsubscribe() -> None:
         settings = hass.data.get(DOMAIN)
@@ -654,6 +728,13 @@ async def websocket_preferences_write(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
     """Persist per-user UI preferences with optimistic conflict detection."""
+    if not hass.data[DOMAIN][CONF_ALLOW_PREFERENCE_WRITE]:
+        connection.send_error(
+            msg["id"],
+            "write_disabled",
+            "Writing Sidebar Organizer preferences is disabled.",
+        )
+        return
     user_id = await _resolve_target_user(
         hass, connection, msg.get("user_id"), msg["id"]
     )
@@ -669,9 +750,8 @@ async def websocket_preferences_write(
     lock = hass.data[DOMAIN][PROFILE_LOCK]
     async with lock:
         current = await hass.async_add_executor_job(file_metadata, path)
-        if (
-            "expected_revision" in msg
-            and has_revision_conflict(msg["expected_revision"], current["revision"])
+        if "expected_revision" in msg and has_revision_conflict(
+            msg["expected_revision"], current["revision"]
         ):
             connection.send_error(
                 msg["id"],
@@ -683,6 +763,9 @@ async def websocket_preferences_write(
             await hass.async_add_executor_job(
                 write_preferences, path, msg["preferences"]
             )
+            saved_preferences = await hass.async_add_executor_job(
+                read_preferences, path
+            )
         except (OSError, ValueError) as err:
             connection.send_error(msg["id"], "invalid_preferences", str(err))
             return
@@ -691,7 +774,7 @@ async def websocket_preferences_write(
         msg["id"],
         {
             "user_id": user_id,
-            "preferences": msg["preferences"],
+            "preferences": saved_preferences,
             "revision": metadata["revision"],
             "schema_version": SCHEMA_VERSION,
         },
@@ -721,7 +804,9 @@ async def _resolve_target_user(
         )
         return None
     try:
-        orphan_profile_exists = _personal_profile_path(hass, target_user_id).exists()
+        orphan_profile_exists = await hass.async_add_executor_job(
+            _personal_profile_path(hass, target_user_id).exists
+        )
     except ValueError:
         connection.send_error(
             msg_id, "invalid_user_id", "The requested profile id is invalid."
@@ -772,7 +857,10 @@ def _check_profile_write_permission(
 async def _ensure_default_config(hass: HomeAssistant) -> None:
     """Create the shared default when configured to do so."""
     path = _path(hass)
-    if not path.exists() and hass.data[DOMAIN][CONF_CREATE_IF_MISSING]:
+    if (
+        not await hass.async_add_executor_job(path.exists)
+        and hass.data[DOMAIN][CONF_CREATE_IF_MISSING]
+    ):
         await hass.async_add_executor_job(atomic_write_text, path, DEFAULT_CONFIG_YAML)
 
 
@@ -784,9 +872,12 @@ def _personal_profile_path(hass: HomeAssistant, user_id: str) -> Path:
     return profile_path(_profiles_path(hass), user_id)
 
 
-def _effective_profile_path(hass: HomeAssistant, user_id: str) -> tuple[Path, str]:
+async def _async_effective_profile_path(
+    hass: HomeAssistant, user_id: str
+) -> tuple[Path, str]:
     personal = _personal_profile_path(hass, user_id)
-    return (personal, "user") if personal.exists() else (_path(hass), "shared")
+    personal_exists = await hass.async_add_executor_job(personal.exists)
+    return (personal, "user") if personal_exists else (_path(hass), "shared")
 
 
 def _profile_metadata(
@@ -794,9 +885,10 @@ def _profile_metadata(
     connection: websocket_api.ActiveConnection,
     user_id: str,
     metadata: dict[str, Any],
+    profile_exists: bool,
 ) -> dict[str, Any]:
-    personal = _personal_profile_path(hass, user_id)
-    effective, source = _effective_profile_path(hass, user_id)
+    effective = Path(metadata.pop("effective_path"))
+    source = "user" if profile_exists else "shared"
     can_write = hass.data[DOMAIN][CONF_ALLOW_WRITE] and (
         connection.user.is_admin or hass.data[DOMAIN][CONF_ALLOW_USER_WRITE]
     )
@@ -804,8 +896,11 @@ def _profile_metadata(
         "available": True,
         "allow_write": can_write,
         "allow_user_write": hass.data[DOMAIN][CONF_ALLOW_USER_WRITE],
+        "allow_preference_write": hass.data[DOMAIN][CONF_ALLOW_PREFERENCE_WRITE],
         "user_id": user_id,
-        "profile_exists": personal.exists(),
+        "profile_exists": profile_exists,
+        "profile_backup_exists": metadata.pop("profile_backup_exists"),
+        "profile_backup_revision": metadata.pop("profile_backup_revision"),
         "source": source,
         "inherited": source == "shared",
         "schema_version": SCHEMA_VERSION,
@@ -836,11 +931,11 @@ async def _notify_shared_profile_subscribers(
 ) -> None:
     """Notify subscribed users who currently inherit the shared configuration."""
     for user_id in list(hass.data[DOMAIN][PROFILE_SUBSCRIBERS]):
-        if _personal_profile_path(hass, user_id).exists():
+        if await hass.async_add_executor_job(
+            _personal_profile_path(hass, user_id).exists
+        ):
             continue
-        metadata = await _async_profile_metadata(
-            hass, exclude_connection, user_id
-        )
+        metadata = await _async_profile_metadata(hass, exclude_connection, user_id)
         _notify_profile_subscribers(
             hass,
             user_id,
@@ -868,7 +963,6 @@ def _path(hass: HomeAssistant) -> Path:
 
 def _metadata(hass: HomeAssistant, metadata: dict[str, Any]) -> dict[str, Any]:
     settings = hass.data[DOMAIN]
-    path = _path(hass)
     return {
         "available": True,
         "schema_version": SCHEMA_VERSION,
@@ -880,13 +974,14 @@ def _metadata(hass: HomeAssistant, metadata: dict[str, Any]) -> dict[str, Any]:
         "profiles_path": settings[CONF_PROFILES_PATH],
         "allow_write": settings[CONF_ALLOW_WRITE],
         "allow_user_write": settings[CONF_ALLOW_USER_WRITE],
+        "allow_preference_write": settings[CONF_ALLOW_PREFERENCE_WRITE],
         "create_if_missing": settings[CONF_CREATE_IF_MISSING],
         **metadata,
     }
 
 
 async def _async_metadata(hass: HomeAssistant) -> dict[str, Any]:
-    metadata = await hass.async_add_executor_job(file_metadata, _path(hass))
+    metadata = await hass.async_add_executor_job(file_metadata_with_backup, _path(hass))
     return _metadata(hass, metadata)
 
 
@@ -895,9 +990,23 @@ async def _async_profile_metadata(
     connection: websocket_api.ActiveConnection,
     user_id: str,
 ) -> dict[str, Any]:
-    effective, _source = _effective_profile_path(hass, user_id)
-    metadata = await hass.async_add_executor_job(file_metadata, effective)
-    return _profile_metadata(hass, connection, user_id, metadata)
+    personal = _personal_profile_path(hass, user_id)
+    shared = _path(hass)
+
+    def collect() -> tuple[dict[str, Any], bool]:
+        profile_exists = personal.exists()
+        effective = personal if profile_exists else shared
+        metadata = file_metadata_with_backup(effective)
+        personal_backup = personal.with_suffix(f"{personal.suffix}.bak")
+        metadata["profile_backup_exists"] = personal_backup.is_file()
+        metadata["profile_backup_revision"] = (
+            file_revision(personal_backup) if personal_backup.is_file() else None
+        )
+        metadata["effective_path"] = str(effective)
+        return metadata, profile_exists
+
+    metadata, profile_exists = await hass.async_add_executor_job(collect)
+    return _profile_metadata(hass, connection, user_id, metadata, profile_exists)
 
 
 def _capabilities(connection: websocket_api.ActiveConnection) -> dict[str, bool]:
@@ -906,6 +1015,7 @@ def _capabilities(connection: websocket_api.ActiveConnection) -> dict[str, bool]
         "optimistic_writes": True,
         "preferences_sync": True,
         "subscriptions": True,
+        "backups": True,
     }
 
 
@@ -963,13 +1073,10 @@ async def _async_check_for_changes(hass: HomeAssistant) -> None:
     for user_id, subscribers in list(settings[PROFILE_SUBSCRIBERS].items()):
         personal_key = str(_personal_profile_path(hass, user_id))
         profile_changed = previous.get(personal_key) != current.get(personal_key)
-        if not profile_changed and not (
-            shared_changed and not _personal_profile_path(hass, user_id).exists()
-        ):
+        inherits_shared = personal_key not in current
+        if not profile_changed and not (shared_changed and inherits_shared):
             continue
-        for (_connection_id, subscription_id), connection in list(
-            subscribers.items()
-        ):
+        for (_connection_id, subscription_id), connection in list(subscribers.items()):
             connection.send_event(
                 subscription_id,
                 await _async_profile_metadata(hass, connection, user_id),
@@ -989,3 +1096,46 @@ async def _async_refresh_watch_state(hass: HomeAssistant, changed_path: Path) ->
         changed,
         {str(_path(hass))},
     )
+
+
+async def _async_restore_backup(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+    target: Path,
+    label: str,
+) -> bool:
+    """Validate and restore one adjacent YAML backup under the write lock."""
+    backup = target.with_suffix(f"{target.suffix}.bak")
+    lock = hass.data[DOMAIN][PROFILE_LOCK]
+    async with lock:
+        current = await hass.async_add_executor_job(file_metadata, target)
+        if "expected_revision" in msg and has_revision_conflict(
+            msg["expected_revision"], current["revision"]
+        ):
+            connection.send_error(
+                msg["id"],
+                "revision_conflict",
+                f"The {label} changed after it was loaded.",
+            )
+            return False
+        if not await hass.async_add_executor_job(backup.is_file):
+            connection.send_error(
+                msg["id"], "backup_missing", f"No previous {label} is available."
+            )
+            return False
+        yaml_text = await hass.async_add_executor_job(backup.read_text, "utf-8")
+        if len(yaml_text.encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
+            connection.send_error(
+                msg["id"], "backup_too_large", f"The previous {label} exceeds 512 KiB."
+            )
+            return False
+        validation = await hass.async_add_executor_job(validate_yaml_config, yaml_text)
+        if not validation["valid"]:
+            connection.send_error(
+                msg["id"], "invalid_backup", f"The previous {label} is invalid."
+            )
+            return False
+        await hass.async_add_executor_job(atomic_write_with_backup, target, yaml_text)
+        await _async_refresh_watch_state(hass, target)
+    return True

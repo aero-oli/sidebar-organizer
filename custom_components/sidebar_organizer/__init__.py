@@ -17,6 +17,7 @@ from homeassistant.helpers import config_validation as cv
 from .const import (
     CONF_ALLOW_WRITE,
     CONF_ALLOW_USER_WRITE,
+    CONF_ALLOW_PREFERENCE_WRITE,
     CONF_CONFIG_PATH,
     CONF_CREATE_IF_MISSING,
     CONF_PROFILES_PATH,
@@ -24,6 +25,7 @@ from .const import (
     CONFIG_WATCH_UNSUB,
     DEFAULT_ALLOW_WRITE,
     DEFAULT_ALLOW_USER_WRITE,
+    DEFAULT_ALLOW_PREFERENCE_WRITE,
     DEFAULT_CONFIG_PATH,
     DEFAULT_CREATE_IF_MISSING,
     DEFAULT_PROFILES_PATH,
@@ -41,8 +43,8 @@ from .helpers import (
     file_revision,
     frontend_module_url,
     normalize_options,
-    resolve_config_path,
-    resolve_profiles_path,
+    prepare_storage_paths,
+    validate_storage_paths,
 )
 from .websocket_api import async_register_websocket_commands, async_start_config_watcher
 
@@ -61,6 +63,10 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_ALLOW_WRITE, default=DEFAULT_ALLOW_WRITE): cv.boolean,
                 vol.Optional(
                     CONF_ALLOW_USER_WRITE, default=DEFAULT_ALLOW_USER_WRITE
+                ): cv.boolean,
+                vol.Optional(
+                    CONF_ALLOW_PREFERENCE_WRITE,
+                    default=DEFAULT_ALLOW_PREFERENCE_WRITE,
                 ): cv.boolean,
                 vol.Optional(
                     CONF_CREATE_IF_MISSING, default=DEFAULT_CREATE_IF_MISSING
@@ -118,15 +124,18 @@ async def _async_setup_from_options(
     config_path = options[CONF_CONFIG_PATH]
     allow_write = options[CONF_ALLOW_WRITE]
     allow_user_write = options[CONF_ALLOW_USER_WRITE]
+    allow_preference_write = options[CONF_ALLOW_PREFERENCE_WRITE]
     create_if_missing = options[CONF_CREATE_IF_MISSING]
     profiles_path = options[CONF_PROFILES_PATH]
 
     try:
-        resolved_path = resolve_config_path(hass.config.path(), config_path)
-        resolved_profiles_path = resolve_profiles_path(
-            hass.config.path(), profiles_path
+        resolved_path, resolved_profiles_path = validate_storage_paths(
+            hass.config.path(), config_path, profiles_path
         )
-    except ValueError as err:
+        await hass.async_add_executor_job(
+            prepare_storage_paths, resolved_path, resolved_profiles_path
+        )
+    except (OSError, ValueError) as err:
         _LOGGER.error("Invalid Sidebar Organizer storage path: %s", err)
         return False
 
@@ -135,13 +144,15 @@ async def _async_setup_from_options(
         CONF_PROFILES_PATH: str(resolved_profiles_path),
         CONF_ALLOW_WRITE: allow_write,
         CONF_ALLOW_USER_WRITE: allow_user_write,
+        CONF_ALLOW_PREFERENCE_WRITE: allow_preference_write,
         CONF_CREATE_IF_MISSING: create_if_missing,
         PROFILE_LOCK: asyncio.Lock(),
         PROFILE_SUBSCRIBERS: hass.data.pop(PROFILE_SUBSCRIBERS, {}),
         CONFIG_SUBSCRIBERS: hass.data.pop(CONFIG_SUBSCRIBERS, {}),
     }
 
-    if not resolved_path.exists() and create_if_missing:
+    config_exists = await hass.async_add_executor_job(resolved_path.exists)
+    if not config_exists and create_if_missing:
         await hass.async_add_executor_job(
             atomic_write_text, resolved_path, DEFAULT_CONFIG_YAML
         )
@@ -159,7 +170,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
 
     frontend_dir = Path(__file__).parent / "frontend"
     frontend_file = frontend_dir / FRONTEND_JS
-    if not frontend_file.exists():
+    if not await hass.async_add_executor_job(frontend_file.exists):
         _LOGGER.error("Sidebar Organizer frontend file is missing: %s", frontend_file)
         return
 

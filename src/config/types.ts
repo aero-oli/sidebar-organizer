@@ -11,7 +11,10 @@ export type ConfigSource = (typeof CONFIG_SOURCES)[number];
 export interface ConfigProviderInfo {
   allow_write?: boolean;
   allow_user_write?: boolean;
+  allow_preference_write?: boolean;
   available: boolean;
+  backup_exists?: boolean;
+  backup_revision?: string | null;
   backend_loaded?: boolean;
   config_path?: string;
   create_if_missing?: boolean;
@@ -26,12 +29,18 @@ export interface ConfigProviderInfo {
   schema_version?: number;
   source?: 'shared' | 'user';
   stale?: boolean;
+  storage_health?: {
+    profile_count?: number;
+    profile_directory_owned: boolean;
+    watcher_active: boolean;
+  };
   warnings?: string[];
   capabilities?: {
     admin_manage_users: boolean;
     optimistic_writes: boolean;
     preferences_sync: boolean;
     subscriptions: boolean;
+    backups: boolean;
   };
 }
 
@@ -49,6 +58,7 @@ export interface ConfigEnvelope extends ConfigProviderInfo {
 export interface SidebarPreferences {
   collapsed_groups: string[];
   known_groups?: string[];
+  sync_collapsed_groups?: boolean;
 }
 
 export interface SidebarPreferencesEnvelope {
@@ -60,6 +70,8 @@ export interface SidebarPreferencesEnvelope {
 export interface ProfileConfigInfo extends ConfigProviderInfo {
   preferences_revision?: string | null;
   profile_exists?: boolean;
+  profile_backup_exists?: boolean;
+  profile_backup_revision?: string | null;
   source?: 'shared' | 'user';
   user_id?: string;
 }

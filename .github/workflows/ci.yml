@@ -1,6 +1,10 @@
 name: CI
 
 on:
+  push:
+    branches:
+      - main
+      - dev
   pull_request:
     branches:
       - main
@@ -12,6 +16,11 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'rollup.config.js'
+      - 'rollup.config.helper.mjs'
+      - 'release.config.mjs'
+      - 'scripts/**'
+      - 'eslint.config.mjs'
+      - 'tsconfig.json'
       - 'hacs.json'
       - '.github/workflows/**'
 
@@ -29,4 +38,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check custom_components/sidebar_organizer tests/backend
       - run: pnpm run verify

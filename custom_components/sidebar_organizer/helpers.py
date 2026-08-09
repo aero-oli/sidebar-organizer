@@ -15,28 +15,34 @@ try:
     from .const import (
         CONF_ALLOW_WRITE,
         CONF_ALLOW_USER_WRITE,
+        CONF_ALLOW_PREFERENCE_WRITE,
         CONF_CONFIG_PATH,
         CONF_CREATE_IF_MISSING,
         CONF_PROFILES_PATH,
         DEFAULT_ALLOW_WRITE,
         DEFAULT_ALLOW_USER_WRITE,
+        DEFAULT_ALLOW_PREFERENCE_WRITE,
         DEFAULT_CONFIG_PATH,
         DEFAULT_CREATE_IF_MISSING,
         DEFAULT_PROFILES_PATH,
         FRONTEND_JS,
         FRONTEND_URL_BASE,
+        PROFILE_DIR_MARKER,
     )
 except ImportError:  # pragma: no cover - used by lightweight direct module tests.
     CONF_ALLOW_WRITE = "allow_write"
     CONF_ALLOW_USER_WRITE = "allow_user_write"
+    CONF_ALLOW_PREFERENCE_WRITE = "allow_preference_write"
     CONF_CONFIG_PATH = "config_path"
     CONF_CREATE_IF_MISSING = "create_if_missing"
     CONF_PROFILES_PATH = "profiles_path"
     DEFAULT_ALLOW_WRITE = True
     DEFAULT_ALLOW_USER_WRITE = False
+    DEFAULT_ALLOW_PREFERENCE_WRITE = True
     DEFAULT_CONFIG_PATH = "sidebar-organizer.yaml"
     DEFAULT_CREATE_IF_MISSING = True
     DEFAULT_PROFILES_PATH = "sidebar-organizer-profiles"
+    PROFILE_DIR_MARKER = ".sidebar-organizer-profiles"
     FRONTEND_JS = "sidebar-organizer.js"
     FRONTEND_URL_BASE = "/sidebar_organizer/frontend"
 
@@ -76,6 +82,9 @@ def normalize_options(raw: dict[str, Any] | None) -> dict[str, Any]:
         CONF_PROFILES_PATH: raw.get(CONF_PROFILES_PATH, DEFAULT_PROFILES_PATH),
         CONF_ALLOW_WRITE: raw.get(CONF_ALLOW_WRITE, DEFAULT_ALLOW_WRITE),
         CONF_ALLOW_USER_WRITE: raw.get(CONF_ALLOW_USER_WRITE, DEFAULT_ALLOW_USER_WRITE),
+        CONF_ALLOW_PREFERENCE_WRITE: raw.get(
+            CONF_ALLOW_PREFERENCE_WRITE, DEFAULT_ALLOW_PREFERENCE_WRITE
+        ),
         CONF_CREATE_IF_MISSING: raw.get(
             CONF_CREATE_IF_MISSING, DEFAULT_CREATE_IF_MISSING
         ),
@@ -109,6 +118,65 @@ def resolve_profiles_path(config_dir: str | Path, profiles_path: str) -> Path:
         return resolve_config_path(config_dir, profiles_path)
     except ValueError as err:
         raise ValueError(str(err).replace("config_path", "profiles_path")) from err
+
+
+def validate_storage_paths(
+    config_dir: str | Path, config_path: str, profiles_path: str
+) -> tuple[Path, Path]:
+    """Resolve storage paths and reject dangerous or ambiguous layouts."""
+    base_path = Path(config_dir).resolve()
+    resolved_config = resolve_config_path(base_path, config_path)
+    resolved_profiles = resolve_profiles_path(base_path, profiles_path)
+
+    if resolved_config == base_path:
+        raise ValueError("config_path must point to a file below the config directory")
+    if resolved_profiles == base_path:
+        raise ValueError("profiles_path must be a dedicated subdirectory")
+    if resolved_config == resolved_profiles:
+        raise ValueError("config_path and profiles_path must be different")
+    if resolved_profiles in resolved_config.parents:
+        raise ValueError("config_path must not be stored inside profiles_path")
+    if resolved_config in resolved_profiles.parents:
+        raise ValueError("profiles_path must not be stored below config_path")
+
+    return resolved_config, resolved_profiles
+
+
+def prepare_storage_paths(config_path: Path, profiles_path: Path) -> None:
+    """Validate on-disk storage types and claim the dedicated profile directory."""
+    if config_path.exists() and not config_path.is_file():
+        raise ValueError("config_path must point to a file")
+    if profiles_path.exists() and not profiles_path.is_dir():
+        raise ValueError("profiles_path must point to a directory")
+
+    profiles_path.mkdir(parents=True, exist_ok=True)
+    marker = profiles_path / PROFILE_DIR_MARKER
+    if marker.exists():
+        if not marker.is_file():
+            raise ValueError("profiles_path ownership marker is invalid")
+        return
+
+    existing_entries = [path for path in profiles_path.iterdir()]
+    if existing_entries and profiles_path.name != DEFAULT_PROFILES_PATH:
+        raise ValueError(
+            "profiles_path is a non-empty unowned directory; choose an empty dedicated directory"
+        )
+    atomic_write_text(marker, "Sidebar Organizer profile storage.\n")
+
+
+def profile_directory_metadata(profiles_dir: Path) -> dict[str, Any]:
+    """Return profile ids from an integration-owned directory."""
+    marker = profiles_dir / PROFILE_DIR_MARKER
+    if not profiles_dir.is_dir() or not marker.is_file():
+        return {"owned": False, "profile_ids": []}
+    profile_ids = sorted(
+        path.stem
+        for path in profiles_dir.glob("*.yaml")
+        if path.is_file()
+        and not path.name.endswith(".yaml.bak")
+        and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", path.stem)
+    )
+    return {"owned": True, "profile_ids": profile_ids}
 
 
 def profile_path(profiles_dir: Path, user_id: str) -> Path:
@@ -163,9 +231,7 @@ def validate_config_object(config: Any) -> list[str]:
                     errors.append(f"{key} group names must be strings.")
                     continue
                 if not _is_list_of_strings(items):
-                    errors.append(
-                        f"{key}.{group_name} must be a list of strings."
-                    )
+                    errors.append(f"{key}.{group_name} must be a list of strings.")
 
     if "animation_delay" in config and not _is_non_negative_number(
         config["animation_delay"]
@@ -264,7 +330,7 @@ def preferences_path(profiles_dir: Path, user_id: str) -> Path:
 def read_preferences(path: Path) -> dict[str, Any]:
     """Read and validate per-user preferences, tolerating a missing file."""
     if not path.exists():
-        return {"collapsed_groups": []}
+        return {"collapsed_groups": [], "sync_collapsed_groups": True}
     parsed = json.loads(path.read_text("utf-8"))
     if not isinstance(parsed, dict) or not _is_list_of_strings(
         parsed.get("collapsed_groups", [])
@@ -273,8 +339,12 @@ def read_preferences(path: Path) -> dict[str, Any]:
     known_groups = parsed.get("known_groups")
     if known_groups is not None and not _is_list_of_strings(known_groups):
         raise ValueError("preferences.known_groups must be a list of strings")
+    sync_collapsed_groups = parsed.get("sync_collapsed_groups", True)
+    if not isinstance(sync_collapsed_groups, bool):
+        raise ValueError("preferences.sync_collapsed_groups must be a boolean")
     return {
         "collapsed_groups": parsed.get("collapsed_groups", []),
+        "sync_collapsed_groups": sync_collapsed_groups,
         **({"known_groups": known_groups} if known_groups is not None else {}),
     }
 
@@ -287,8 +357,12 @@ def write_preferences(path: Path, preferences: dict[str, Any]) -> None:
     known_groups = preferences.get("known_groups")
     if known_groups is not None and not _is_list_of_strings(known_groups):
         raise ValueError("preferences.known_groups must be a list of strings")
+    sync_collapsed_groups = preferences.get("sync_collapsed_groups", True)
+    if not isinstance(sync_collapsed_groups, bool):
+        raise ValueError("preferences.sync_collapsed_groups must be a boolean")
     payload = {
         "collapsed_groups": collapsed,
+        "sync_collapsed_groups": sync_collapsed_groups,
         **({"known_groups": known_groups} if known_groups is not None else {}),
     }
     atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
@@ -304,6 +378,17 @@ def file_metadata(path: Path) -> dict[str, Any]:
         "last_modified": stat.st_mtime,
         "size": stat.st_size,
         "revision": file_revision(path),
+    }
+
+
+def file_metadata_with_backup(path: Path) -> dict[str, Any]:
+    """Return active and adjacent backup metadata."""
+    backup = path.with_suffix(f"{path.suffix}.bak")
+    backup_exists = backup.is_file()
+    return {
+        **file_metadata(path),
+        "backup_exists": backup_exists,
+        "backup_revision": file_revision(backup) if backup_exists else None,
     }
 
 
@@ -381,9 +466,7 @@ def _validate_color_config(value: Any, errors: list[str]) -> None:
     if not isinstance(value, dict):
         errors.append("color_config must be an object.")
         return
-    if "border_radius" in value and not _is_non_negative_number(
-        value["border_radius"]
-    ):
+    if "border_radius" in value and not _is_non_negative_number(value["border_radius"]):
         errors.append("color_config.border_radius must be a non-negative number.")
 
     color_fields = (
@@ -405,7 +488,9 @@ def _validate_color_config(value: Any, errors: list[str]) -> None:
         for key in color_fields:
             if key in colors and not isinstance(colors[key], str):
                 errors.append(f"color_config.{mode}.{key} must be a string.")
-        _validate_string_record(colors, "custom_styles", errors, f"color_config.{mode}.")
+        _validate_string_record(
+            colors, "custom_styles", errors, f"color_config.{mode}."
+        )
 
     if "custom_theme" in value:
         theme = value["custom_theme"]

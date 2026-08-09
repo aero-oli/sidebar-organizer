@@ -10,15 +10,18 @@
           "profiles_path": "User profiles directory",
           "allow_write": "Allow writing from the UI",
           "allow_user_write": "Allow users to edit their own profile",
+          "allow_preference_write": "Allow users to sync sidebar preferences",
           "create_if_missing": "Create the file if missing"
         }
       }
     },
     "error": {
-      "invalid_path": "The config and profiles paths must resolve inside the Home Assistant config directory."
+      "invalid_path": "Use a config file and a dedicated profiles directory below the Home Assistant config directory. Existing custom profile directories must be empty or already owned by Sidebar Organizer."
     },
     "abort": {
-      "already_configured": "Sidebar Organizer is already configured."
+      "already_configured": "Sidebar Organizer is already configured.",
+      "invalid_path": "Sidebar Organizer YAML contains an unsafe storage path.",
+      "yaml_updated": "Sidebar Organizer settings were updated from YAML."
     }
   },
   "options": {
@@ -31,12 +34,13 @@
           "profiles_path": "User profiles directory",
           "allow_write": "Allow writing from the UI",
           "allow_user_write": "Allow users to edit their own profile",
+          "allow_preference_write": "Allow users to sync sidebar preferences",
           "create_if_missing": "Create the file if missing"
         }
       }
     },
     "error": {
-      "invalid_path": "The config and profiles paths must resolve inside the Home Assistant config directory."
+      "invalid_path": "Use a config file and a dedicated profiles directory below the Home Assistant config directory. Existing custom profile directories must be empty or already owned by Sidebar Organizer."
     }
   }
 }

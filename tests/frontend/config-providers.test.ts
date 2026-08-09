@@ -24,7 +24,7 @@ import { getHaConfigCache, getHaConfigCacheKey } from '../../src/utilities/confi
 import { RuntimeLifecycle } from '../../src/runtime/lifecycle';
 import { SerialTaskQueue } from '../../src/runtime/serial-task-queue';
 import { SubscriptionGuard } from '../../src/runtime/subscription-guard';
-import { resolveCollapsedGroups } from '../../src/config/preferences';
+import { areGroupsCollapsed, resolveCollapsedGroups, setGroupsCollapsed } from '../../src/config/preferences';
 
 describe('parseSidebarYamlConfig', () => {
   it('parses and normalizes valid sidebar YAML', () => {
@@ -146,6 +146,18 @@ describe('resolveCollapsedGroups', () => {
     );
   });
 
+  it('toggles only the requested group subset and preserves bottom groups', () => {
+    const collapsed = new Set(['Top one', 'Bottom tools']);
+    assert.equal(areGroupsCollapsed(['Top one', 'Top two'], collapsed), false);
+
+    const allTopCollapsed = setGroupsCollapsed(['Top one', 'Top two'], collapsed, true);
+    assert.deepEqual([...allTopCollapsed], ['Top one', 'Bottom tools', 'Top two']);
+    assert.equal(areGroupsCollapsed(['Top one', 'Top two'], allTopCollapsed), true);
+
+    const expandedTop = setGroupsCollapsed(['Top one', 'Top two'], allTopCollapsed, false);
+    assert.deepEqual([...expandedTop], ['Bottom tools']);
+  });
+
   it('preserves legacy synced choices without reviving configured defaults', () => {
     assert.deepEqual(
       [...resolveCollapsedGroups(['Rooms', 'Admin'], ['Rooms'], new Set(['Admin', 'Removed']), undefined)],
@@ -189,6 +201,9 @@ describe('HomeAssistantConfigProvider', () => {
         if (message.type === 'sidebar_organizer/config/write') {
           return { exists: true, last_modified: 1710000001 };
         }
+        if (message.type === 'sidebar_organizer/config/restore') {
+          return { exists: true, last_modified: 1710000002, backup_exists: true };
+        }
         throw new Error('unexpected command');
       },
     };
@@ -201,6 +216,7 @@ describe('HomeAssistantConfigProvider', () => {
     assert.equal(readResult.last_modified, 1710000000);
     assert.equal((await provider.validate('bottom_items: []')).valid, true);
     await provider.write('bottom_items: []', 'revision-one');
+    await provider.restore('revision-two');
 
     assert.deepEqual(
       calls.map((call) => call.type),
@@ -209,9 +225,11 @@ describe('HomeAssistantConfigProvider', () => {
         'sidebar_organizer/config/read',
         'sidebar_organizer/config/validate',
         'sidebar_organizer/config/write',
+        'sidebar_organizer/config/restore',
       ]
     );
     assert.equal(calls[3].expected_revision, 'revision-one');
+    assert.equal(calls[4].expected_revision, 'revision-two');
   });
 
   it('returns unavailable info when the backend command is missing', async () => {
@@ -353,6 +371,7 @@ describe('HomeAssistantProfileProvider', () => {
     assert.equal((await provider.read()).config?.bottom_items?.length, 0);
     await provider.write('bottom_items: []', 'one');
     await provider.delete('two');
+    await provider.restore('two');
     await provider.copy('shared', 'target-user', 'two');
 
     assert.deepEqual(
@@ -361,12 +380,13 @@ describe('HomeAssistantProfileProvider', () => {
         ['sidebar_organizer/profile/read', 'target-user'],
         ['sidebar_organizer/profile/write', 'target-user'],
         ['sidebar_organizer/profile/delete', 'target-user'],
+        ['sidebar_organizer/profile/restore', 'target-user'],
         ['sidebar_organizer/profile/copy', undefined],
       ]
     );
     assert.equal(calls[1].expected_revision, 'one');
-    assert.equal(calls[3].source, 'shared');
-    assert.equal(calls[3].target_user_id, 'target-user');
+    assert.equal(calls[4].source, 'shared');
+    assert.equal(calls[4].target_user_id, 'target-user');
   });
 
   it('reads and writes server-synced preferences with revisions', async () => {
@@ -383,11 +403,12 @@ describe('HomeAssistantProfileProvider', () => {
     });
 
     assert.deepEqual((await provider.readPreferences()).preferences.collapsed_groups, ['Rooms']);
-    await provider.writePreferences(['Admin'], 'previous', ['Rooms', 'Admin']);
+    await provider.writePreferences(['Admin'], 'previous', ['Rooms', 'Admin'], false);
     assert.equal(calls[1].expected_revision, 'previous');
     assert.deepEqual(calls[1].preferences, {
       collapsed_groups: ['Admin'],
       known_groups: ['Rooms', 'Admin'],
+      sync_collapsed_groups: false,
     });
   });
 });

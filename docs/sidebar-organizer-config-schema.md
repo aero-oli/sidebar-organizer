@@ -43,6 +43,8 @@ The default files are:
 - `/config/sidebar-organizer-profiles/<home-assistant-user-id>.yaml`
 - `/config/sidebar-organizer-profiles/<home-assistant-user-id>.preferences.json`
 
-Profiles are complete configurations. A missing profile inherits the shared file. Preferences contain only device-independent UI state: collapsed group names and the group names known when that choice was saved. Tracking known groups lets newly added groups inherit `default_collapsed` without reviving removed groups. Unknown panel IDs remain in YAML and are ignored for a user who cannot access them.
+Profiles are complete configurations. A missing profile inherits the shared file. Preferences contain collapsed group names, the group names known when that choice was saved, and `sync_collapsed_groups`. Tracking known groups lets newly added groups inherit `default_collapsed` without reviving removed groups. When synchronization is disabled, collapsed state remains browser-local. Unknown panel IDs remain in YAML and are ignored for a user who cannot access them.
 
 Writes are atomic, limited to 512 KiB, and use content revisions to reject stale editors. Replacing YAML retains the previous version as an adjacent `.bak` file. Invalid YAML never replaces the active file.
+
+The profile directory must contain the `.sidebar-organizer-profiles` ownership marker. This prevents a broad config directory from being interpreted as a collection of manageable profiles.

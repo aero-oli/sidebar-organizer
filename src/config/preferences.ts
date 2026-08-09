@@ -16,3 +16,19 @@ export const resolveCollapsedGroups = (
   }
   return collapsed;
 };
+
+export const areGroupsCollapsed = (groupNames: string[], collapsed: Set<string>): boolean =>
+  groupNames.every((group) => collapsed.has(group));
+
+export const setGroupsCollapsed = (
+  groupNames: string[],
+  collapsed: Set<string>,
+  shouldCollapse: boolean
+): Set<string> => {
+  const next = new Set(collapsed);
+  for (const group of groupNames) {
+    if (shouldCollapse) next.add(group);
+    else next.delete(group);
+  }
+  return next;
+};

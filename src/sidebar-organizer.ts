@@ -53,6 +53,7 @@ import {
   getConfigSource,
   getScopedStorageKey,
   getStorage,
+  getStorageStringArray,
   removeStorage,
   setActiveStorageUser,
   setStorage,
@@ -63,7 +64,7 @@ import { HAElement, HAQuerySelector, HAQuerySelectorEvent, OnListenDetail } from
 import { HomeAssistantStylesManager } from 'home-assistant-styles-manager';
 
 import { SoGroupDivider } from './components/so-group-divider';
-import { resolveCollapsedGroups } from './config/preferences';
+import { areGroupsCollapsed, resolveCollapsedGroups, setGroupsCollapsed } from './config/preferences';
 import { HomeAssistantProfileProvider } from './config/providers/ha-profile-provider';
 import { RuntimeLifecycle } from './runtime/lifecycle';
 import { SerialTaskQueue } from './runtime/serial-task-queue';
@@ -177,6 +178,8 @@ export class SidebarOrganizer {
   private _preferencesSaveTimer?: number;
   private _syncedCollapsedItems?: Set<string>;
   private _syncedKnownGroups?: Set<string>;
+  private _syncCollapsedGroups = true;
+  private _preferenceWritesAllowed = false;
   private _usingStaleConfig = false;
   private _sidebarSnapshot?: {
     attributes: Map<HTMLElement, Array<[string, string]>>;
@@ -262,6 +265,7 @@ export class SidebarOrganizer {
       if (!this._lifecycle.isCurrent(generation)) return;
       this._activePersonalProfile = Boolean(profileInfo.available && profileInfo.profile_exists);
       this._effectiveRevision = profileInfo.revision;
+      this._preferenceWritesAllowed = Boolean(profileInfo.allow_preference_write);
       if (profileInfo.available && !this._profileUnsubscribe) {
         this._profileUnsubscribe = await profileProvider.subscribe(this._handleProfileChanged);
       }
@@ -421,13 +425,13 @@ export class SidebarOrganizer {
       return;
     }
     if (Boolean(info.profile_exists) !== this._activePersonalProfile) {
-      this._reloadWindow();
+      void this.run();
       return;
     }
     if (!info.revision) return;
     if (this._effectiveRevision === info.revision) return;
     this._effectiveRevision = info.revision;
-    this._reloadWindow();
+    void this.run();
   };
 
   private async _checkDashboardChange(): Promise<void> {
@@ -609,7 +613,8 @@ export class SidebarOrganizer {
     try {
       const result = await provider.readPreferences();
       this._preferencesRevision = result.revision;
-      if (result.revision) {
+      this._syncCollapsedGroups = result.preferences.sync_collapsed_groups !== false;
+      if (result.revision && this._syncCollapsedGroups) {
         this._syncedCollapsedItems = new Set(result.preferences.collapsed_groups);
         this._syncedKnownGroups = result.preferences.known_groups
           ? new Set(result.preferences.known_groups)
@@ -620,6 +625,7 @@ export class SidebarOrganizer {
       }
     } catch (err) {
       this._preferencesRevision = undefined;
+      this._syncCollapsedGroups = false;
       this._syncedCollapsedItems = undefined;
       this._syncedKnownGroups = undefined;
       LOGGER.warn('Server-synced sidebar preferences are unavailable; using this device only.', err);
@@ -629,6 +635,7 @@ export class SidebarOrganizer {
   private _schedulePreferencesSave(): void {
     const source = getConfigSource();
     if (source !== 'home_assistant_config' && source !== 'home_assistant_profile') return;
+    if (!this._syncCollapsedGroups || !this._preferenceWritesAllowed) return;
     if (this._preferencesSaveTimer !== undefined) window.clearTimeout(this._preferencesSaveTimer);
     this._preferencesSaveTimer = window.setTimeout(async () => {
       this._preferencesSaveTimer = undefined;
@@ -637,7 +644,8 @@ export class SidebarOrganizer {
         const result = await provider.writePreferences(
           [...this.collapsedItems],
           this._preferencesRevision,
-          this._currentGroupNames()
+          this._currentGroupNames(),
+          true
         );
         this._preferencesRevision = result.revision;
         this._syncedKnownGroups = new Set(result.preferences.known_groups || this._currentGroupNames());
@@ -649,7 +657,8 @@ export class SidebarOrganizer {
           const result = await provider.writePreferences(
             [...this.collapsedItems],
             current.revision,
-            this._currentGroupNames()
+            this._currentGroupNames(),
+            true
           );
           this._preferencesRevision = result.revision;
           this._syncedKnownGroups = new Set(result.preferences.known_groups || this._currentGroupNames());
@@ -742,10 +751,12 @@ export class SidebarOrganizer {
     this._pinnedGroups = normalizePinnedGroups(pinned_groups || {});
     // Initialize collapsed groups based on config, this will be used to set initial state of groups and manage collapse/expand functionality
     const allGroups = { ...(custom_groups || {}), ...(bottom_groups || {}) };
+    const localCollapsedItems =
+      getStorage(STORAGE.COLLAPSE) !== null ? new Set(getStorageStringArray(STORAGE.COLLAPSE)) : undefined;
     this.collapsedItems = resolveCollapsedGroups(
       Object.keys(allGroups),
       default_collapsed,
-      this._syncedCollapsedItems,
+      this._syncedCollapsedItems || localCollapsedItems,
       this._syncedKnownGroups
     );
 
@@ -1100,7 +1111,7 @@ export class SidebarOrganizer {
     const hasAnyItems = Object.values(this._config.custom_groups || {}).flat().length > 0;
     if (groupKeys.length === 0 || !hasAnyItems) return;
 
-    const isAllCollapsed = this.collapsedItems.size === groupKeys.length;
+    const isAllCollapsed = areGroupsCollapsed(groupKeys, this.collapsedItems);
 
     const expandCollapseIcon = document.createElement(ELEMENT.HA_ICON) as any;
     expandCollapseIcon.icon = isAllCollapsed ? MDI.PLUS : MDI.MINUS;
@@ -1115,9 +1126,11 @@ export class SidebarOrganizer {
       // optional: prevents synthetic click paths in some browsers
       if (ev.cancelable) ev.preventDefault();
 
-      this.collapsedItems.size === groupKeys.length
-        ? this.collapsedItems.clear()
-        : (this.collapsedItems = new Set(groupKeys));
+      this.collapsedItems = setGroupsCollapsed(
+        groupKeys,
+        this.collapsedItems,
+        !areGroupsCollapsed(groupKeys, this.collapsedItems)
+      );
 
       this._handleCollapsed(this.collapsedItems);
       this._schedulePreferencesSave();
@@ -1134,9 +1147,8 @@ export class SidebarOrganizer {
   private _handleCollapsedChange(): void {
     const toggleIcon = this.sideBarRoot?.querySelector(SELECTOR.HEADER_TOGGLE_ICON) as HTMLElement;
     if (!toggleIcon) return;
-    const collapsedSize = this.collapsedItems.size;
-    const groupsLength = Object.keys(this._config?.custom_groups || {}).length;
-    const isAllCollapsed = collapsedSize === groupsLength;
+    const groupKeys = Object.keys(this._config?.custom_groups || {});
+    const isAllCollapsed = areGroupsCollapsed(groupKeys, this.collapsedItems);
     toggleIcon.classList.toggle(CLASS.ACTIVE, isAllCollapsed!);
     toggleIcon.setAttribute('icon', isAllCollapsed ? MDI.PLUS : MDI.MINUS);
   }
@@ -1237,8 +1249,8 @@ export class SidebarOrganizer {
       return;
     }
     if (useConfigFile || configSource === 'home_assistant_config' || configSource === 'home_assistant_profile') {
-      console.log('Using shared config source');
-      this._reloadWindow();
+      console.log('Applying synced config source');
+      void this.run();
       return;
     }
 
@@ -1256,9 +1268,7 @@ export class SidebarOrganizer {
           removeStorage(STORAGE.HIDDEN_PANELS);
           resolve();
         });
-      resetConfigPromise().then(() => {
-        this._reloadWindow();
-      });
+      resetConfigPromise().then(() => void this.run());
     }
   }
 

@@ -120,7 +120,7 @@ export const ALERT_MSG = {
   FRONTEND_MODULE: 'You may experience issues when plugin is not loaded as a module.',
   INSTALLATION_LINK: `See: ${REPO_URL}#installation`,
   UPLOAD_SUCCESS_VALID_RELOAD:
-    'Config uploaded successfully and is valid. Click OK to reload the page and apply the new configuration.',
+    'The configuration is valid. Click OK to import and apply it.',
   UNCATEGORIZED_GROUP_INFO:
     'This group automatically includes any items that are not assigned to any other custom groups or bottom list. These items will be displayed without group header separation in the sidebar. Reordering items in group, or group order in general is available.',
 };

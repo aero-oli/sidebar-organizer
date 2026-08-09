@@ -11,12 +11,23 @@ from homeassistant.core import callback
 from .const import (
     CONF_ALLOW_WRITE,
     CONF_ALLOW_USER_WRITE,
+    CONF_ALLOW_PREFERENCE_WRITE,
     CONF_CONFIG_PATH,
     CONF_CREATE_IF_MISSING,
     CONF_PROFILES_PATH,
     DOMAIN,
 )
-from .helpers import normalize_options, resolve_config_path, resolve_profiles_path
+from .helpers import normalize_options, prepare_storage_paths, validate_storage_paths
+
+
+async def _async_validate_paths(hass, values: dict[str, Any]) -> None:
+    """Validate path relationships and on-disk storage without blocking Core."""
+    config_path, profiles_path = validate_storage_paths(
+        hass.config.path(),
+        values[CONF_CONFIG_PATH],
+        values[CONF_PROFILES_PATH],
+    )
+    await hass.async_add_executor_job(prepare_storage_paths, config_path, profiles_path)
 
 
 def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
@@ -27,6 +38,10 @@ def _options_schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Required(CONF_ALLOW_WRITE, default=defaults[CONF_ALLOW_WRITE]): bool,
             vol.Required(
                 CONF_ALLOW_USER_WRITE, default=defaults[CONF_ALLOW_USER_WRITE]
+            ): bool,
+            vol.Required(
+                CONF_ALLOW_PREFERENCE_WRITE,
+                default=defaults[CONF_ALLOW_PREFERENCE_WRITE],
             ): bool,
             vol.Required(
                 CONF_CREATE_IF_MISSING, default=defaults[CONF_CREATE_IF_MISSING]
@@ -50,13 +65,8 @@ class SidebarOrganizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             try:
-                resolve_config_path(
-                    self.hass.config.path(), user_input[CONF_CONFIG_PATH]
-                )
-                resolve_profiles_path(
-                    self.hass.config.path(), user_input[CONF_PROFILES_PATH]
-                )
-            except ValueError:
+                await _async_validate_paths(self.hass, user_input)
+            except (OSError, ValueError):
                 errors["base"] = "invalid_path"
             else:
                 return self.async_create_entry(
@@ -74,11 +84,21 @@ class SidebarOrganizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_import(self, import_config: dict[str, Any]):
         """Import YAML configuration."""
         await self.async_set_unique_id(DOMAIN)
-        self._abort_if_unique_id_configured()
+        options = normalize_options(import_config)
+        try:
+            await _async_validate_paths(self.hass, options)
+        except (OSError, ValueError):
+            return self.async_abort(reason="invalid_path")
+        existing_entries = self._async_current_entries()
+        if existing_entries:
+            self.hass.config_entries.async_update_entry(
+                existing_entries[0], options=options
+            )
+            return self.async_abort(reason="yaml_updated")
         return self.async_create_entry(
             title="Sidebar Organizer",
             data={},
-            options=normalize_options(import_config),
+            options=options,
         )
 
     @staticmethod
@@ -98,13 +118,8 @@ class SidebarOrganizerOptionsFlow(config_entries.OptionsFlow):
 
         if user_input is not None:
             try:
-                resolve_config_path(
-                    self.hass.config.path(), user_input[CONF_CONFIG_PATH]
-                )
-                resolve_profiles_path(
-                    self.hass.config.path(), user_input[CONF_PROFILES_PATH]
-                )
-            except ValueError:
+                await _async_validate_paths(self.hass, user_input)
+            except (OSError, ValueError):
                 errors["base"] = "invalid_path"
             else:
                 return self.async_create_entry(
