@@ -1,3 +1,9 @@
+## [4.6.0](https://github.com/aero-oli/sidebar-organizer/compare/v4.5.0...v4.6.0) (2026-08-09)
+
+### Features
+
+* redesign settings as guided workbench ([b2af6a5](https://github.com/aero-oli/sidebar-organizer/commit/b2af6a569a6dc063289297f58bf351f2d4f6a55c))
+
 ## [4.5.0](https://github.com/aero-oli/sidebar-organizer/compare/v4.4.1...v4.5.0) (2026-08-09)
 
 ### Features
