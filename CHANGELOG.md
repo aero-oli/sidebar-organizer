@@ -1,3 +1,17 @@
+## [4.5.0](https://github.com/aero-oli/sidebar-organizer/compare/v4.4.1...v4.5.0) (2026-08-09)
+
+### Features
+
+* harden configuration management and recovery ([ae3ff44](https://github.com/aero-oli/sidebar-organizer/commit/ae3ff44d2ac5f0eea127566e19a4999661a5a0cb))
+
+### Bug Fixes
+
+* pin Ruff for stable release checks ([aee8243](https://github.com/aero-oli/sidebar-organizer/commit/aee824337f3e0d61f7fee94c26122d53b151b41c))
+
+### Documentation
+
+* update README for fork and v4 integration ([760bd0b](https://github.com/aero-oli/sidebar-organizer/commit/760bd0b73d442c74bd3406934a6fae25a83b46f4))
+
 ## [4.4.1](https://github.com/aero-oli/sidebar-organizer/compare/v4.4.0...v4.4.1) (2026-07-31)
 
 ### Bug Fixes
