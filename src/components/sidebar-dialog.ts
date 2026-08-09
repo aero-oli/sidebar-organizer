@@ -1,12 +1,11 @@
-import { ALERT_MSG, CONFIG_SECTION, DIALOG_TAG, STORAGE, TAB_STATE, VERSION } from '@constants';
+import type { SidebarWorkbenchYamlEditor } from './editor/workbench/yaml-editor';
+
+import { ALERT_MSG, CONFIG_SECTION, DIALOG_TAG, STORAGE, VERSION } from '@constants';
 import { SidebarConfig, NewItemConfig, SidebardPanelConfig, PANEL_TYPE } from '@types';
 import {
   fetchFileConfig,
   getHaConfigCacheKey,
   hasBlockingConfigErrors,
-  INVALID_ITEM_KEYS,
-  InvalidItemKeys,
-  InvalidItemLabels,
   isItemsValid,
   normalizePinnedGroups,
   tryCorrectConfig,
@@ -40,9 +39,11 @@ import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, css, TemplateResult, PropertyValues, CSSResultGroup, nothing } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
-import YAML from 'yaml';
 
 import './editor';
+import './editor/workbench/yaml-editor';
+import YAML from 'yaml';
+
 import {
   ConfigProviderInfo,
   ConfigSource,
@@ -60,6 +61,12 @@ import { SubscriptionGuard } from '../runtime/subscription-guard';
 import { BaseEditor } from './base-editor';
 import * as ELEMENT from './editor';
 import { EditorStore } from './editor-store';
+import {
+  EditorSessionController,
+  type EditorDraftEnvelope,
+  type ValidationIssue,
+  type WorkbenchRoute,
+} from './editor/workbench';
 import { SidebarOrganizerDialog } from './sidebar-organizer-dialog';
 import { SidebarOrganizerDialogWA } from './sidebar-organizer-dialog_wa';
 
@@ -78,10 +85,7 @@ export class SidebarConfigDialog extends BaseEditor {
   @state() public _useConfigFile = false;
   @state() public _configSource: ConfigSource = 'browser_storage';
 
-  @state() public _tabState: TAB_STATE = TAB_STATE.BASE;
-
   @state() private _configLoaded = false;
-  @state() public _currSection: CONFIG_SECTION = CONFIG_SECTION.GENERAL;
 
   @state() public _initPanelOrder: string[] = [];
   @state() public _initCombiPanels: string[] = [];
@@ -108,6 +112,9 @@ export class SidebarConfigDialog extends BaseEditor {
   @state() private _lastLoadedHaConfigModified?: number;
   @state() private _rawYaml = '';
   @state() public _narrow = false;
+  @state() private _workbenchRoute: WorkbenchRoute = 'sidebar';
+  @state() private _previewOpen = false;
+  @state() private _draftOffer?: { state: 'matching' | 'stale'; draft: EditorDraftEnvelope };
 
   private _configSubscription = new SubscriptionGuard();
   private _profileSubscription = new SubscriptionGuard();
@@ -120,13 +127,13 @@ export class SidebarConfigDialog extends BaseEditor {
   private _preferencesRevision?: string | null;
   private _preferenceCollapsedGroups: string[] = [];
   private _preferenceKnownGroups?: string[];
+  private _session?: EditorSessionController;
+  private _sessionIdentity?: string;
 
   @query(DIALOG_TAG.COLORS) _dialogColors!: ELEMENT.SidebarDialogColors;
   @query(DIALOG_TAG.PANELS) _dialogPanels!: ELEMENT.SidebarDialogPanels;
   @query(DIALOG_TAG.PREVIEW) _dialogPreview!: ELEMENT.SidebarDialogPreview;
-  @query(DIALOG_TAG.CODE_EDITOR) _dialogCodeEditor!: ELEMENT.SidebarDialogCodeEditor;
   @query(DIALOG_TAG.NEW_ITEMS) _dialogNewItems!: ELEMENT.SidebarDialogNewItems;
-  @query(DIALOG_TAG.MENU) _dialogMenu!: ELEMENT.SidebarDialogMenu;
 
   @query('#sidebar-config') _configSection!: HTMLElement;
 
@@ -140,7 +147,6 @@ export class SidebarConfigDialog extends BaseEditor {
     setActiveStorageUser(this.hass.user?.id);
     this._configSource = getConfigSource();
     this._useConfigFile = this._configSource === 'static_yaml';
-    this._tabState = this._configSource === 'static_yaml' ? TAB_STATE.CODE : TAB_STATE.BASE;
     this.addEventListener('sidebar-config-changed', this._sidebarConfigChanged as EventListener);
     this._refreshHaConfigInfo();
     this._startHaConfigSubscription();
@@ -159,6 +165,7 @@ export class SidebarConfigDialog extends BaseEditor {
     this._profileLoadGeneration += 1;
     this._profileSubscription.dispose();
     this._configSubscription.dispose();
+    this._session?.destroy();
   }
 
   public get hasUnsavedChanges(): boolean {
@@ -187,15 +194,16 @@ export class SidebarConfigDialog extends BaseEditor {
   public get saveBlockedReason(): string | undefined {
     if (this._saving) return 'A configuration save is already in progress.';
     if (!this.canWriteCurrentSource) return 'This configuration is read-only for your account.';
+    if (this._session?.issues.some((issue) => issue.severity === 'error')) {
+      return this._session.yamlValid
+        ? 'Resolve the validation errors before applying.'
+        : 'Fix the YAML syntax errors before applying.';
+    }
     if (this._invalidConfig && hasBlockingConfigErrors(this._invalidConfig)) {
       return 'A panel is assigned more than once. Remove the duplicate assignment before saving.';
     }
     if (!this.hasUnsavedChanges) return 'No unsaved changes.';
     return undefined;
-  }
-
-  public get GUImode(): boolean {
-    return this._tabState === TAB_STATE.BASE;
   }
 
   private async _showDialogBox(type: DialogType, params: DialogBoxParams): Promise<any> {
@@ -222,9 +230,6 @@ export class SidebarConfigDialog extends BaseEditor {
     }
     if (_changedProperties.has('_configSource')) {
       this._useConfigFile = this._configSource === 'static_yaml';
-      if (this._configSource === 'static_yaml') {
-        this._tabState = TAB_STATE.CODE;
-      }
       this._startHaConfigSubscription();
     }
 
@@ -384,9 +389,7 @@ export class SidebarConfigDialog extends BaseEditor {
       const hasConfigChanged = JSON.stringify(this._baselineConfig) !== JSON.stringify(newConfig);
 
       this._mainDialog._saveDisabled = !hasConfigChanged || !this.canWriteCurrentSource;
-      if (this._store !== undefined) {
-        this._store.sidebarConfig = this._sidebarConfig;
-      } else {
+      if (this._store === undefined) {
         this._createStore();
       }
     }
@@ -452,61 +455,416 @@ export class SidebarConfigDialog extends BaseEditor {
     }
 
     this._createStore();
-
-    const mainContent = this._renderMainConfig();
-    const sidebarPreview = this._renderSidebarPreview();
-
-    return html` <div id="sidebar-dialog-wrapper" class="dialog-content">${mainContent} ${sidebarPreview}</div> `;
+    this._ensureSession();
+    return this._renderWorkbench();
   }
 
-  private _createStore(): void {
-    if (this._store) return;
-    this._store = new EditorStore(this, this._sidebarConfig);
-    console.log('Store created ...', this._store);
+  private _ensureSession(): void {
+    const target = this._configSource === 'home_assistant_profile' ? this._selectedProfile : 'shared';
+    const identity = `${this.hass.user?.id || 'anonymous'}:${this._configSource}:${target}:${this._baselineRevision || ''}`;
+    if (this._session && this._sessionIdentity === identity) return;
+    this._session?.destroy();
+    this._sessionIdentity = identity;
+    this._session = new EditorSessionController({
+      userId: this.hass.user?.id || 'anonymous',
+      source: this._configSource,
+      target,
+      baselineRevision: this._baselineRevision,
+      rawYaml: this._baselineRawYaml || this._rawYaml,
+      config: this._sidebarConfig,
+      activeRoute: this._workbenchRoute,
+      onChange: (snapshot) => {
+        this._workbenchRoute = snapshot.activeRoute;
+        this._mainDialog._configValid = !snapshot.issues.some((issue) => issue.severity === 'error');
+        this._mainDialog._saveDisabled = Boolean(this.saveBlockedReason);
+        this.requestUpdate();
+      },
+    });
+    const draft = this._session.draftState();
+    this._draftOffer = draft.state === 'none' ? undefined : draft;
   }
-  private _renderMainConfig(): TemplateResult {
-    if (this._tabState !== TAB_STATE.BASE) {
-      return this._renderCodeEditor();
-    }
+
+  private _renderWorkbench(): TemplateResult {
+    const session = this._session!;
+    const issueCount = session.issues.filter((issue) => issue.severity === 'error').length;
+    const targetName = this._activeTargetName();
+    const routes: Array<{ route: WorkbenchRoute; label: string; description: string; icon: string }> = [
+      { route: 'sidebar', label: 'Sidebar', description: 'Profile and sync', icon: 'mdi:account-cog-outline' },
+      { route: 'organize', label: 'Organize', description: 'Groups and items', icon: 'mdi:format-list-group' },
+      { route: 'appearance', label: 'Appearance', description: 'Look and behaviour', icon: 'mdi:palette-outline' },
+      { route: 'rules', label: 'Rules', description: 'Visibility and alerts', icon: 'mdi:filter-cog-outline' },
+      { route: 'yaml', label: 'YAML', description: 'Source editor', icon: 'mdi:code-braces' },
+      { route: 'review', label: 'Review & Apply', description: 'Validate and publish', icon: 'mdi:check-decagram-outline' },
+    ];
 
     return html`
-      <div id="sidebar-config">
-        <div class="dialog-menu">
-          <sidebar-dialog-menu
-            .hass=${this.hass}
-            ._store=${this._store}
-            .value=${this._currSection}
-            @menu-value-changed=${this._handleMenuValueChanged}
-          ></sidebar-dialog-menu>
+      <div class="workbench">
+        <header class="workbench-header">
+          <button class="target-control" @click=${() => this._goToRoute('sidebar')}>
+            <ha-icon icon="mdi:account-circle-outline"></ha-icon>
+            <span><small>Editing sidebar for</small><strong>${targetName}</strong></span>
+            <ha-icon icon="mdi:chevron-down"></ha-icon>
+          </button>
+          <div class="header-status" aria-live="polite">
+            <span class="status-chip" data-state=${session.dirty ? 'draft' : 'saved'}>
+              ${session.dirty ? 'Draft autosaves locally' : 'Up to date'}
+            </span>
+            <span class="status-chip" data-state=${issueCount ? 'error' : 'valid'}>
+              ${issueCount ? `${issueCount} issue${issueCount === 1 ? '' : 's'}` : 'Valid'}
+            </span>
+          </div>
+          <ha-button appearance="plain" class="preview-toggle" @click=${this._openPreview}>
+            <ha-icon slot="start" icon="mdi:eye-outline"></ha-icon>Preview
+          </ha-button>
+        </header>
+
+        ${this._draftOffer ? this._renderDraftRecovery(this._draftOffer) : nothing}
+
+        <div class="workbench-body">
+          <nav class="task-rail" aria-label="Settings stages">
+            ${routes.map(
+              ({ route, label, description, icon }, index) => html`
+                <button
+                  class="task-link"
+                  data-active=${route === this._workbenchRoute}
+                  @click=${() => this._goToRoute(route)}
+                >
+                  <span class="stage-number">${index + 1}</span>
+                  <ha-icon icon=${icon}></ha-icon>
+                  <span><strong>${label}</strong><small>${description}</small></span>
+                  ${session.issues.some((issue) => issue.route === route && issue.severity === 'error')
+                    ? html`<ha-icon class="stage-error" icon="mdi:alert-circle"></ha-icon>`
+                    : nothing}
+                </button>
+              `
+            )}
+          </nav>
+
+          <main class="editor-canvas" data-yaml-invalid=${!session.yamlValid && this._workbenchRoute !== 'yaml'}>
+            <div class="mobile-stage-select">
+              <ha-select
+                .label=${'Settings stage'}
+                .value=${this._workbenchRoute}
+                @selected=${(event: Event) => this._goToRoute((event.target as HTMLSelectElement).value as WorkbenchRoute)}
+              >
+                ${routes.map(({ route, label }) => html`<ha-list-item .value=${route}>${label}</ha-list-item>`)}
+              </ha-select>
+            </div>
+            ${!session.yamlValid && this._workbenchRoute !== 'yaml'
+              ? html`<ha-alert alert-type="warning" class="stale-preview-alert">
+                  YAML contains errors. Visual controls and preview show the last valid version.
+                  <ha-button appearance="plain" size="s" @click=${() => this._goToRoute('yaml')}>Fix YAML</ha-button>
+                </ha-alert>`
+              : nothing}
+            ${this._renderWorkbenchRoute()}
+          </main>
+
+          <aside class="desktop-preview" aria-label="Live sidebar preview">${this._renderSidebarPreview()}</aside>
         </div>
-        ${this._renderConfigSection()}
+
+        <footer class="workbench-actions">
+          <div class="apply-state">
+            ${this.saveBlockedReason
+              ? html`<ha-icon icon="mdi:information-outline"></ha-icon><span>${this.saveBlockedReason}</span>`
+              : html`<ha-icon icon="mdi:check-circle-outline"></ha-icon><span>Ready to review and apply.</span>`}
+          </div>
+          <div class="action-buttons">
+            ${session.dirty
+              ? html`<ha-button appearance="plain" destructive @click=${this._discardDraft}>Discard draft</ha-button>`
+              : nothing}
+            <ha-button appearance="plain" @click=${() => this._mainDialog.closeDialog()}>Close</ha-button>
+            <ha-button
+              appearance="accent"
+              .disabled=${Boolean(this.saveBlockedReason)}
+              @click=${() =>
+                this._workbenchRoute === 'review' ? this._requestApply() : this._goToRoute('review')}
+            >
+              ${this._workbenchRoute === 'review' ? 'Apply changes' : 'Review & Apply'}
+            </ha-button>
+          </div>
+        </footer>
+
+        <div class="preview-scrim" ?open=${this._previewOpen} @click=${this._closePreview}></div>
+        <aside class="preview-drawer" ?open=${this._previewOpen} aria-hidden=${!this._previewOpen} role="dialog" aria-modal="true" @keydown=${this._previewKeydown}>
+          <div class="drawer-header"><strong>Sidebar preview</strong>
+            <ha-icon-button
+              .label=${'Close preview'}
+              .path=${'M19,6.41 17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z'}
+              @click=${this._closePreview}
+            ></ha-icon-button>
+          </div>
+          ${this._renderSidebarPreview()}
+        </aside>
       </div>
     `;
   }
 
-  private _handleMenuValueChanged(ev: CustomEvent): void {
-    ev.stopPropagation();
-    const newValue = ev.detail.value || null;
-    const configArea = newValue ? (newValue as CONFIG_SECTION) : CONFIG_SECTION.GENERAL;
-    const sectionFrom = this._currSection;
-    this._currSection = configArea;
-    if (sectionFrom === CONFIG_SECTION.NEW_ITEMS && configArea !== CONFIG_SECTION.NEW_ITEMS) {
-      this._dialogPreview._hightlightItem(null);
+  private _renderWorkbenchRoute(): TemplateResult {
+    const route = this._workbenchRoute;
+    if (route === 'sidebar') return this._renderStage('Sidebar', 'Choose who this configuration applies to and how it is synchronized.', this._renderSettingsOverview());
+    if (route === 'appearance') return this._renderStage('Appearance', 'Tune the sidebar’s title, behaviour, dimensions, theme and colours.', this._renderBaseConfig());
+    if (route === 'organize') {
+      return this._renderStage(
+        'Organize',
+        'Arrange panels and groups, then add or edit custom items in the same workspace.',
+        html`
+          <section class="workbench-card structure-builder">
+            <div class="card-heading"><div><h2>Structure builder</h2><p>Drag rows to reorder, or use each row’s menu for keyboard-friendly move actions.</p></div></div>
+            ${this._renderPanelConfig('organize')}
+          </section>
+          <details class="workbench-card add-items" open>
+            <summary><span><strong>Add or edit custom items</strong><small>Create links, panels and actions without leaving Organize.</small></span></summary>
+            ${this._renderNewItemsConfig()}
+          </details>
+        `
+      );
+    }
+    if (route === 'rules') return this._renderStage('Rules', 'Manage hidden items, visibility templates and notification badges.', this._renderPanelConfig('rules'));
+    if (route === 'yaml') return this._renderYamlWorkbench();
+    return this._renderReview();
+  }
+
+  private _renderStage(title: string, description: string, content: TemplateResult): TemplateResult {
+    return html`<section class="stage"><div class="stage-heading"><h1>${title}</h1><p>${description}</p></div>${content}</section>`;
+  }
+
+  private _renderYamlWorkbench(): TemplateResult {
+    const session = this._session!;
+    return this._renderStage(
+      'YAML',
+      'Edit the same configuration directly. Formatting runs only when you ask for it.',
+      html`
+        <div class="yaml-toolbar">
+          <ha-button appearance="plain" @click=${this._formatYaml}><ha-icon slot="start" icon="mdi:format-align-left"></ha-icon>Format YAML</ha-button>
+          <span>Shortcut: Shift + Alt + F</span>
+        </div>
+        <sidebar-workbench-yaml-editor
+          .value=${session.rawYaml}
+          .issues=${session.issues.filter((issue) => issue.route === 'yaml')}
+          @yaml-changed=${this._yamlChanged}
+          @format-yaml=${this._formatYaml}
+        ></sidebar-workbench-yaml-editor>
+        ${this._renderProblems(session.issues)}
+      `
+    );
+  }
+
+  private _renderReview(): TemplateResult {
+    const session = this._session!;
+    const info = this._configSource === 'home_assistant_profile' ? this._profileInfo : this._haConfigInfo;
+    return this._renderStage(
+      'Review & Apply',
+      'Nothing is published until you apply. Home Assistant validation and revision checks run again immediately before writing.',
+      html`
+        <div class="review-grid">
+          <section class="workbench-card review-summary">
+            <h2>Publication</h2>
+            <dl><div><dt>Target</dt><dd>${this._activeTargetName()}</dd></div><div><dt>Source</dt><dd>${this._configSource.replaceAll('_', ' ')}</dd></div><div><dt>Backup</dt><dd>${info.backup_exists || ('profile_backup_exists' in info && info.profile_backup_exists) ? 'Available' : 'Created by Home Assistant on write'}</dd></div></dl>
+            <div class="review-actions">
+              <ha-button appearance="plain" @click=${this._downloadCurrentDraft}>Download draft</ha-button>
+              ${isHomeAssistantConfigSource(this._configSource)
+                ? html`<ha-button appearance="plain" @click=${this._reloadLatestForRecovery}>Reload latest</ha-button>`
+                : nothing}
+            </div>
+          </section>
+          <section class="workbench-card"><h2>Changes</h2>
+            ${session.changes.length
+              ? html`<ul class="change-list">${session.changes.map((change) => html`<li><span data-kind=${change.kind}>${change.kind}</span>${change.label}</li>`)}</ul>`
+              : html`<p class="empty-state">No configuration changes yet.</p>`}
+          </section>
+        </div>
+        ${this._renderProblems(session.issues)}
+        <details class="workbench-card raw-diff"><summary><strong>Raw YAML comparison</strong><small>Baseline and current draft</small></summary>
+          <div class="diff-columns"><div><h3>Published</h3><pre>${session.baselineRawYaml}</pre></div><div><h3>Draft</h3><pre>${session.rawYaml}</pre></div></div>
+        </details>
+      `
+    );
+  }
+
+  private _renderProblems(issues: ValidationIssue[]): TemplateResult {
+    return html`<section class="workbench-card problems"><h2>Problems <span>${issues.length}</span></h2>
+      ${issues.length
+        ? html`<ul>${issues.map((issue) => html`<li><button @click=${() => this._openIssue(issue)}><ha-icon icon=${issue.severity === 'error' ? 'mdi:alert-circle' : 'mdi:alert-outline'}></ha-icon><span><strong>${issue.message}</strong><small>${issue.line ? `Line ${issue.line}, column ${issue.column || 1}` : issue.path.join('.') || issue.route}</small></span></button></li>`)}</ul>`
+        : html`<p class="empty-state"><ha-icon icon="mdi:check-circle-outline"></ha-icon>No validation problems found.</p>`}
+    </section>`;
+  }
+
+  private _renderDraftRecovery(offer: { state: 'matching' | 'stale'; draft: EditorDraftEnvelope }): TemplateResult {
+    const stale = offer.state === 'stale';
+    return html`<ha-alert alert-type=${stale ? 'warning' : 'info'} class="draft-recovery">
+      <div><strong>${stale ? 'A draft was created from an older published revision.' : 'A recoverable draft is available.'}</strong>
+      <span>${stale ? 'Compare or download it before choosing whether to recover it.' : `Last edited ${new Date(offer.draft.timestamp).toLocaleString()}.`}</span></div>
+      <div class="draft-actions">
+        ${stale ? html`<ha-button appearance="plain" @click=${() => this._downloadDraft(offer.draft)}>Download</ha-button>` : nothing}
+        <ha-button appearance="plain" @click=${this._discardOfferedDraft}>Discard</ha-button>
+        <ha-button appearance="accent" @click=${() => this._resumeDraft(offer.draft)}>${stale ? 'Open recovery copy' : 'Resume'}</ha-button>
+      </div>
+    </ha-alert>`;
+  }
+
+  private _goToRoute(route: WorkbenchRoute): void {
+    this._workbenchRoute = route;
+    this._session?.setRoute(route);
+    if (route !== 'organize' && this._dialogPreview) this._dialogPreview._hightlightItem(null);
+  }
+
+  public navigateWorkbench(route: WorkbenchRoute): void {
+    this._goToRoute(route);
+  }
+
+  private _activeTargetName(): string {
+    if (this._configSource === 'home_assistant_profile') {
+      if (this._selectedProfile === 'shared') return 'Shared default';
+      return this._profileUsers.find((user) => user.id === this._selectedProfile)?.name || 'Personal profile';
+    }
+    if (this._configSource === 'home_assistant_config') return 'Shared default';
+    if (this._configSource === 'static_yaml') return 'Legacy YAML file';
+    return 'This browser';
+  }
+
+  private _yamlChanged(event: CustomEvent<{ yaml: string }>): void {
+    event.stopPropagation();
+    this._session!.setRawYaml(event.detail.yaml);
+    this._rawYaml = event.detail.yaml;
+    if (this._session!.yamlValid) {
+      this._sidebarConfig = structuredClone(this._session!.config);
+      if (this._configSource === 'static_yaml' && this._invalidConfig) {
+        this._invalidConfig = { ...this._invalidConfig, config: this._sidebarConfig, valid: true };
+      }
     }
   }
 
-  private _renderConfigSection(): TemplateResult {
-    const selectedArea = this._currSection;
-    const areaMap = {
-      [CONFIG_SECTION.GENERAL]: this._renderSettingsOverview(),
-      [CONFIG_SECTION.APPEARANCE]: this._renderBaseConfig(),
-      [CONFIG_SECTION.PANELS]: this._renderPanelConfig(),
-      [CONFIG_SECTION.NEW_ITEMS]: this._renderNewItemsConfig(),
-    };
-
-    return areaMap[selectedArea] || html``;
+  private _formatYaml(): void {
+    try {
+      this._session!.formatYaml();
+      this._rawYaml = this._session!.rawYaml;
+      this._sidebarConfig = structuredClone(this._session!.config);
+    } catch {
+      showToast(this, { message: 'Fix YAML errors before formatting.' });
+    }
   }
 
+  private _openIssue(issue: ValidationIssue): void {
+    this._goToRoute(issue.route);
+    if (issue.route === 'yaml') {
+      void this.updateComplete.then(() =>
+        this.shadowRoot?.querySelector<SidebarWorkbenchYamlEditor>('sidebar-workbench-yaml-editor')?.revealIssue(issue)
+      );
+    }
+  }
+
+  private _requestApply(): void {
+    this.dispatchEvent(new CustomEvent('workbench-apply', { bubbles: true, composed: true }));
+  }
+
+  private _openPreview = (): void => {
+    this._previewOpen = true;
+    void this.updateComplete.then(() =>
+      this.shadowRoot?.querySelector<HTMLElement>('.preview-drawer ha-icon-button')?.focus()
+    );
+  };
+
+  private _closePreview = (): void => {
+    this._previewOpen = false;
+    void this.updateComplete.then(() => this.shadowRoot?.querySelector<HTMLElement>('.preview-toggle')?.focus());
+  };
+
+  private _previewKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this._closePreview();
+      return;
+    }
+    if (event.key === 'Tab') {
+      const drawer = this.shadowRoot?.querySelector<HTMLElement>('.preview-drawer');
+      const focusable = [...(drawer?.querySelectorAll<HTMLElement>('button, ha-button, ha-icon-button, [tabindex="0"]') || [])].filter(
+        (element) => !element.hasAttribute('disabled')
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && this.shadowRoot?.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && this.shadowRoot?.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  }
+
+  private _resumeDraft(draft: EditorDraftEnvelope): void {
+    this._session!.resumeDraft(draft);
+    this._rawYaml = draft.rawYaml;
+    if (this._session!.yamlValid) this._sidebarConfig = structuredClone(this._session!.config);
+    this._draftOffer = undefined;
+    this._workbenchRoute = draft.baselineRevision === this._baselineRevision ? draft.activeRoute : 'review';
+  }
+
+  private _discardOfferedDraft(): void {
+    this._session!.discardDraft();
+    this._draftOffer = undefined;
+  }
+
+  private _downloadDraft(draft: EditorDraftEnvelope): void {
+    const url = URL.createObjectURL(new Blob([draft.rawYaml], { type: 'application/x-yaml' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'sidebar-organizer-recovered-draft.yaml';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  private _downloadCurrentDraft = (): void => {
+    this._downloadDraft({
+      version: 1,
+      userId: this.hass.user?.id || 'anonymous',
+      source: this._configSource,
+      target: this._configSource === 'home_assistant_profile' ? this._selectedProfile : 'shared',
+      rawYaml: this._session!.rawYaml,
+      baselineRevision: this._baselineRevision || null,
+      activeRoute: this._workbenchRoute,
+      timestamp: Date.now(),
+    });
+  };
+
+  private _reloadLatestForRecovery = async (): Promise<void> => {
+    const confirmed = await showConfirmDialog(
+      this,
+      'Reload the latest Home Assistant version? Your current draft will remain available as a recovery copy.',
+      'Reload latest',
+      'Keep editing'
+    );
+    if (!confirmed) return;
+    this._session?.destroy();
+    this._session = undefined;
+    this._sessionIdentity = undefined;
+    if (this._configSource === 'home_assistant_profile') await this._reloadHomeAssistantProfile();
+    else await this._reloadHomeAssistantConfig(false);
+    this._workbenchRoute = 'review';
+    this.requestUpdate();
+  };
+
+  private _discardDraft = async (): Promise<void> => {
+    const confirmed = await showConfirmDialog(this, 'Discard this local draft and restore the published configuration?', 'Discard', 'Keep editing');
+    if (!confirmed) return;
+    this._session!.discardDraft();
+    this._rawYaml = this._baselineRawYaml;
+    this._sidebarConfig = structuredClone(this._baselineConfig);
+    this._sessionIdentity = undefined;
+    this.requestUpdate();
+  };
+
+  public _markSessionApplied(): void {
+    const rawYaml = this._rawYaml.trim() ? this._rawYaml : YAML.stringify(this._sidebarConfig);
+    this._session?.markApplied(rawYaml, this._sidebarConfig, this._baselineRevision);
+  }
+
+  private _createStore(): void {
+    if (this._store) return;
+    this._store = new EditorStore(this);
+    console.log('Store created ...', this._store);
+  }
   private _renderSettingsOverview(): TemplateResult {
     const source = this._configSource;
     const usesHomeAssistant = source === 'home_assistant_config' || source === 'home_assistant_profile';
@@ -597,11 +955,12 @@ export class SidebarConfigDialog extends BaseEditor {
     ></sidebar-dialog-colors>`;
   }
 
-  private _renderPanelConfig(): TemplateResult {
+  private _renderPanelConfig(workbenchMode?: 'organize' | 'rules'): TemplateResult {
     return html` <sidebar-dialog-panels
       .hass=${this.hass}
       ._store=${this._store}
       ._sidebarConfig=${this._sidebarConfig}
+      .workbenchMode=${workbenchMode}
       @sidebar-changed=${this._handleSidebarChanged}
     ></sidebar-dialog-panels>`;
   }
@@ -615,131 +974,6 @@ export class SidebarConfigDialog extends BaseEditor {
         @sidebar-changed=${this._handleSidebarChanged}
         @item-clicked=${this._handleItemClicked}
       ></sidebar-dialog-new-items>
-    `;
-  }
-
-  public _toggleCodeEditor() {
-    this._tabState = this._tabState === TAB_STATE.BASE ? TAB_STATE.CODE : TAB_STATE.BASE;
-  }
-
-  private _renderCodeEditor(): TemplateResult {
-    return html`
-      <div class="config-content">
-        ${this._invalidConfig && Object.keys(this._invalidConfig).length > 0
-          ? html``
-          : this._uploading
-            ? html`<ha-spinner .size=${'large'}></ha-spinner>`
-            : html`
-                <sidebar-dialog-code-editor
-                  .hass=${this.hass}
-                  ._store=${this._store}
-                  ._configSource=${this._configSource}
-                  ._rawYaml=${this._rawYaml}
-                  ._sidebarConfig=${this._sidebarConfig}
-                  @raw-yaml-changed=${this._handleRawYamlChanged}
-                  @sidebar-changed=${this._handleSidebarChanged}
-                ></sidebar-dialog-code-editor>
-              `}
-        ${this._renderConfigSourceSettings()}
-      </div>
-    `;
-  }
-
-  private _renderInvalidConfig(): TemplateResult | typeof nothing {
-    if (!this._invalidConfig || Object.keys(this._invalidConfig).length === 0) {
-      return nothing;
-    }
-    const BTN_LABEL = TRANSLATED_LABEL.BTN_LABEL;
-    const _invalidConfig = this._invalidConfig;
-    const isConfigValid = this._invalidConfig.valid === true;
-    const extraActionsStyle = `display: flex;  width: auto; justify-content: space-between;`;
-    return html`
-      <div class="invalid-config" .hidden=${this._useConfigFile} style="--code-mirror-max-height: 250px;">
-        <ha-alert alert-type="info">${ALERT_MSG.INFO_EDIT_UPLOAD_CONFIG}</ha-alert>
-        <ha-yaml-editor
-          .label=${'EDITOR FOR INVALID CONFIG'}
-          .hass=${this.hass}
-          .defaultValue=${this._invalidConfig.config}
-          .hasExtraActions=${true}
-          .readOnly=${isConfigValid}
-          @value-changed=${(ev: CustomEvent) => {
-            ev.stopPropagation();
-            const { isValid, value } = ev.detail;
-            if (isValid) {
-              this._invalidConfig = { ..._invalidConfig, config: value };
-              this.requestUpdate();
-            }
-          }}
-        >
-          <div slot="extra-actions" style="${extraActionsStyle}">
-            <ha-button
-              appearance="plain"
-              size="s"
-              .disabled=${isConfigValid}
-              @click=${() => this._handleInvalidConfig('auto-correct')}
-              >${BTN_LABEL.AUTO_CORRECT}</ha-button
-            >
-            <ha-button
-              appearance="plain"
-              size="s"
-              destructive
-              .label=${isConfigValid ? BTN_LABEL.SAVE_MIGRATE : BTN_LABEL.CHECK_VALIDITY}
-              @click=${() => this._handleInvalidConfig(isConfigValid ? 'save' : 'check')}
-              >${isConfigValid ? BTN_LABEL.SAVE_MIGRATE : BTN_LABEL.CHECK_VALIDITY}</ha-button
-            >
-          </div>
-        </ha-yaml-editor>
-
-        <ha-alert alert-type=${!_invalidConfig.valid ? 'warning' : 'success'}
-          >${!isConfigValid ? ALERT_MSG.CONFIG_INVALID : ALERT_MSG.CONFIG_VALID}</ha-alert
-        >
-        <div class="invalid-config-content" ?hidden=${isConfigValid}>
-          ${INVALID_ITEM_KEYS.map((key: InvalidItemKeys) => {
-            const items = _invalidConfig[key] as string[] | boolean;
-            const hasItems = Array.isArray(items) ? items.length > 0 : Boolean(items);
-            const title = InvalidItemLabels[key];
-            return hasItems
-              ? html`
-                  <div>
-                    <h2>${title}</h2>
-                    <ul>
-                      ${Array.isArray(items)
-                        ? items.map((item: string) => html`<li>${item}</li>`)
-                        : html`<li>True</li>`}
-                    </ul>
-                  </div>
-                `
-              : nothing;
-          })}
-        </div>
-      </div>
-    `;
-  }
-  private _renderConfigSourceSettings() {
-    const source = this._configSource;
-    const useJsonFile = source === 'static_yaml';
-    const useHaConfig = source === 'home_assistant_config' || source === 'home_assistant_profile';
-    const haInfo = source === 'home_assistant_profile' ? this._profileInfo : this._haDiagnostics || this._haConfigInfo;
-
-    return html`
-      <div class="overlay">
-        <ha-alert alert-type="info" .hidden=${!useJsonFile}> ${ALERT_MSG.USE_CONFIG_FILE} </ha-alert>
-        <ha-alert alert-type=${haInfo.available ? 'info' : 'warning'} .hidden=${!useHaConfig}>
-          ${haInfo.available ? ALERT_MSG.HA_CONFIG_MODE : ALERT_MSG.HA_CONFIG_UNAVAILABLE}
-        </ha-alert>
-        ${useHaConfig && this._haConfigErrors.length > 0
-          ? html`<ha-alert alert-type="warning">${this._haConfigErrors.join(' ')}</ha-alert>`
-          : nothing}
-        ${useHaConfig && this._legacyFrontendResourceLoaded()
-          ? html`<ha-alert alert-type="warning">
-              Old Dashboard resource is still loaded. Remove
-              <code>/hacsfiles/sidebar-organizer/sidebar-organizer.js</code> from Dashboard resources.
-            </ha-alert>`
-          : nothing}
-        ${this._renderInvalidConfig()} ${useHaConfig ? this._renderProfileSelector() : nothing}
-        ${this._renderSyncStatus(haInfo, useHaConfig, useJsonFile)}
-        ${useHaConfig ? this._renderHaDiagnostics(haInfo) : nothing}
-      </div>
     `;
   }
 
@@ -1049,20 +1283,14 @@ export class SidebarConfigDialog extends BaseEditor {
     event.stopPropagation();
 
     const newConfig = event.detail;
-    if (
-      (this._configSource === 'home_assistant_config' || this._configSource === 'home_assistant_profile') &&
-      event.target !== this._dialogCodeEditor
-    ) {
-      this._rawYaml = '';
-    }
+    if (this._session && !this._session.yamlValid) return;
     this._sidebarConfig = newConfig;
-  }
-
-  private _handleRawYamlChanged(event: CustomEvent<{ yaml: string }>): void {
-    event.stopPropagation();
-    this._rawYaml = event.detail.yaml;
-    if (this._configSource === 'home_assistant_config' || this._configSource === 'home_assistant_profile') {
-      this._mainDialog._saveDisabled = !this.canWriteCurrentSource;
+    if (this._configSource === 'static_yaml' && this._invalidConfig) {
+      this._invalidConfig = { ...this._invalidConfig, config: newConfig, valid: true };
+    }
+    if (this._session) {
+      this._session.setConfig(newConfig);
+      this._rawYaml = this._session.rawYaml;
     }
   }
 
@@ -1123,6 +1351,10 @@ export class SidebarConfigDialog extends BaseEditor {
     console.log('Config file validation result', result);
     if (typeof result === 'object' && result !== null) {
       this._invalidConfig = result;
+      this._sidebarConfig = structuredClone(result.config);
+      this._baselineConfig = structuredClone(result.config);
+      this._rawYaml = YAML.stringify(result.config);
+      this._baselineRawYaml = this._rawYaml;
     }
     this._configLoaded = true;
   };
@@ -1145,12 +1377,13 @@ export class SidebarConfigDialog extends BaseEditor {
     const provider = new HomeAssistantConfigProvider(this.hass);
     const result = await provider.read();
     if (!result.valid || !result.config) {
-      this._clearServerYamlDraft();
+      this._rawYaml = result.rawYaml || '';
+      this._baselineRawYaml = this._rawYaml;
       this._haConfigErrors = result.errors;
       this._panelWarnings = [];
       this._sidebarConfig = {};
       this._baselineConfig = structuredClone(this._sidebarConfig);
-      this._baselineRevision = undefined;
+      this._baselineRevision = result.revision;
       this._lastLoadedHaConfigModified = undefined;
       this._configLoaded = true;
       this._mainDialog._configValid = false;
@@ -1282,9 +1515,9 @@ export class SidebarConfigDialog extends BaseEditor {
     if (this.hasUnsavedChanges) {
       const discard = await showConfirmDialog(
         this,
-        'Switch profiles and discard the unsaved changes in this editor?',
+        'Switch profiles? Your current draft will stay saved on this device.',
         'Switch profile',
-        'Cancel'
+        'Stay here'
       );
       if (!discard) {
         this.requestUpdate();
@@ -1321,13 +1554,18 @@ export class SidebarConfigDialog extends BaseEditor {
       return;
     }
     if (!result.available || !result.valid || !result.config) {
-      this._clearServerYamlDraft();
+      if (result.available) {
+        this._rawYaml = result.rawYaml || '';
+        this._baselineRawYaml = this._rawYaml;
+      } else {
+        this._clearServerYamlDraft();
+      }
       this._profileInfo = result;
       this._haConfigErrors = result.errors;
       this._panelWarnings = [];
       this._sidebarConfig = {};
       this._baselineConfig = structuredClone(this._sidebarConfig);
-      this._baselineRevision = undefined;
+      this._baselineRevision = result.revision;
       this._configLoaded = true;
       this._mainDialog._configValid = false;
       return;
@@ -1365,6 +1603,20 @@ export class SidebarConfigDialog extends BaseEditor {
   private _saveHomeAssistantProfileUnlocked = async (): Promise<boolean> => {
     if (this._selectedProfile === 'shared') return this._saveHomeAssistantConfigUnlocked();
     const provider = new HomeAssistantProfileProvider(this.hass, this._selectedProfile);
+    const latestInfo = await provider.info();
+    const changedSinceLoad = Boolean(this._baselineRevision && latestInfo.revision !== this._baselineRevision);
+    if (
+      changedSinceLoad &&
+      !(await showConfirmDialog(
+        this,
+        'This profile changed after you opened it. Review or download your draft before explicitly overwriting the latest version.',
+        'Overwrite latest',
+        'Cancel'
+      ))
+    ) {
+      this._workbenchRoute = 'review';
+      return false;
+    }
     const yaml = this._rawYaml.trim() ? this._rawYaml : YAML.stringify(this._sidebarConfig);
     const validation = await provider.validate(yaml);
     if (!validation.valid) {
@@ -1374,7 +1626,7 @@ export class SidebarConfigDialog extends BaseEditor {
     }
 
     try {
-      this._profileInfo = await provider.write(yaml, this._profileInfo.revision);
+      this._profileInfo = await provider.write(yaml, changedSinceLoad ? latestInfo.revision : this._profileInfo.revision);
       this._rawYaml = yaml;
       this._baselineRawYaml = yaml;
       this._haConfigErrors = [];
@@ -1506,8 +1758,15 @@ export class SidebarConfigDialog extends BaseEditor {
   private _sidebarConfigChanged(event: CustomEvent<ConfigChangedEvent>) {
     event.stopPropagation();
     const newConfig = event.detail.config as SidebarConfig;
-    // Update the sidebar config
+    if (this._session && !this._session.yamlValid) return;
     this._sidebarConfig = newConfig;
+    if (this._configSource === 'static_yaml' && this._invalidConfig) {
+      this._invalidConfig = { ...this._invalidConfig, config: newConfig, valid: true };
+    }
+    if (this._session) {
+      this._session.setConfig(newConfig);
+      this._rawYaml = this._session.rawYaml;
+    }
   }
 
   public _handleInvalidConfig = async (action: 'check' | 'auto-correct' | 'save') => {
@@ -1892,9 +2151,273 @@ export class SidebarConfigDialog extends BaseEditor {
           --side-dialog-gutter: 0.5rem;
           --side-dialog-padding: 1rem;
           --scrollbar-thumb-color: rgba(0, 0, 0, 0.2);
-          max-width: 1400px;
+          max-width: none;
           display: flex;
           margin: 0 auto;
+          min-width: 0;
+          width: 100%;
+        }
+        button {
+          font: inherit;
+        }
+        .workbench {
+          display: grid;
+          grid-template-rows: auto auto minmax(0, 1fr) auto;
+          min-height: min(790px, calc(96vh - 72px));
+          overflow: hidden;
+          width: 100%;
+        }
+        .workbench-header {
+          align-items: center;
+          border-block-end: 1px solid var(--divider-color);
+          display: flex;
+          gap: 12px;
+          min-height: 64px;
+          padding: 8px 12px;
+        }
+        .target-control,
+        .task-link,
+        .problems button {
+          background: transparent;
+          border: 0;
+          color: var(--primary-text-color);
+          cursor: pointer;
+        }
+        .target-control {
+          align-items: center;
+          border-radius: 10px;
+          display: flex;
+          gap: 10px;
+          min-height: 48px;
+          padding: 4px 10px;
+          text-align: start;
+        }
+        .target-control:hover,
+        .task-link:hover,
+        .problems button:hover {
+          background: var(--secondary-background-color);
+        }
+        .target-control span,
+        .task-link span,
+        .stage-heading,
+        .card-heading > div {
+          display: grid;
+          min-width: 0;
+        }
+        .target-control small,
+        .task-link small,
+        summary small {
+          color: var(--secondary-text-color);
+          font-size: 0.78rem;
+        }
+        .header-status {
+          display: flex;
+          flex: 1;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: flex-end;
+        }
+        .status-chip {
+          background: var(--secondary-background-color);
+          border-radius: 999px;
+          color: var(--secondary-text-color);
+          font-size: 0.78rem;
+          padding: 5px 9px;
+        }
+        .status-chip[data-state='draft'] { color: var(--warning-color, #f9a825); }
+        .status-chip[data-state='error'] { color: var(--error-color); }
+        .status-chip[data-state='valid'] { color: var(--success-color, #43a047); }
+        .preview-toggle { display: none; min-height: 44px; }
+        .workbench-body {
+          display: grid;
+          grid-template-columns: 220px minmax(0, 1fr) minmax(300px, 360px);
+          min-height: 0;
+          overflow: hidden;
+        }
+        .task-rail {
+          border-inline-end: 1px solid var(--divider-color);
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          overflow-y: auto;
+          padding: 12px 8px;
+        }
+        .task-link {
+          align-items: center;
+          border-radius: 10px;
+          display: grid;
+          gap: 8px;
+          grid-template-columns: 24px 24px minmax(0, 1fr) auto;
+          min-height: 56px;
+          padding: 7px 8px;
+          text-align: start;
+          width: 100%;
+        }
+        .task-link[data-active='true'] {
+          background: color-mix(in srgb, var(--primary-color) 14%, transparent);
+          color: var(--primary-color);
+        }
+        .stage-number {
+          align-items: center;
+          background: var(--secondary-background-color);
+          border-radius: 50%;
+          display: flex !important;
+          font-size: 0.75rem;
+          height: 24px;
+          justify-content: center;
+          width: 24px;
+        }
+        .stage-error { color: var(--error-color); }
+        .editor-canvas {
+          min-width: 0;
+          overflow: auto;
+          padding: 20px clamp(14px, 2vw, 28px) 32px;
+        }
+        .desktop-preview {
+          background: var(--primary-background-color);
+          border-inline-start: 1px solid var(--divider-color);
+          min-width: 0;
+          overflow: auto;
+          padding: 14px;
+        }
+        .desktop-preview #sidebar-preview {
+          margin-inline: auto;
+          max-width: 340px;
+          position: sticky;
+          top: 0;
+        }
+        .stage { display: grid; gap: 18px; }
+        .stage-heading h1 { font-size: 1.55rem; margin: 0; }
+        .stage-heading p { color: var(--secondary-text-color); line-height: 1.45; margin: 5px 0 0; }
+        .workbench-card {
+          background: var(--card-background-color, var(--mdc-theme-surface));
+          border: 1px solid var(--divider-color);
+          border-radius: 12px;
+          box-sizing: border-box;
+          display: grid;
+          gap: 14px;
+          min-width: 0;
+          padding: 16px;
+        }
+        .workbench-card h2, .workbench-card p { margin: 0; }
+        .card-heading { display: flex; justify-content: space-between; }
+        .card-heading p { color: var(--secondary-text-color); font-size: .9rem; margin-top: 4px; }
+        .add-items summary, .raw-diff summary {
+          align-items: center;
+          cursor: pointer;
+          display: flex;
+          min-height: 44px;
+        }
+        summary span { display: grid; }
+        .yaml-toolbar { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+        .yaml-toolbar span { color: var(--secondary-text-color); font-size: .8rem; }
+        .problems h2 { align-items: center; display: flex; gap: 8px; }
+        .problems h2 span { background: var(--secondary-background-color); border-radius: 999px; font-size: .75rem; padding: 3px 7px; }
+        .problems ul, .change-list { list-style: none; margin: 0; padding: 0; }
+        .problems button { align-items: flex-start; border-radius: 8px; display: flex; gap: 10px; min-height: 44px; padding: 8px; text-align: start; width: 100%; }
+        .problems button > span { display: grid; gap: 2px; }
+        .problems button small { color: var(--secondary-text-color); }
+        .problems ha-icon { color: var(--error-color); }
+        .empty-state { align-items: center; color: var(--secondary-text-color); display: flex; gap: 8px; padding: 12px 0; }
+        .review-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .review-summary dl { display: grid; gap: 8px; margin: 0; }
+        .review-summary dl div { border-block-end: 1px solid var(--divider-color); display: flex; gap: 12px; justify-content: space-between; padding-block-end: 8px; }
+        .review-summary dt { color: var(--secondary-text-color); }
+        .review-summary dd { font-weight: 600; margin: 0; text-align: end; }
+        .review-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+        .change-list { display: grid; gap: 8px; }
+        .change-list li { align-items: center; display: flex; gap: 10px; min-height: 30px; }
+        .change-list span { border-radius: 999px; font-size: .72rem; padding: 3px 7px; text-transform: uppercase; }
+        .change-list span[data-kind='added'] { background: color-mix(in srgb, var(--success-color, #43a047) 18%, transparent); color: var(--success-color, #43a047); }
+        .change-list span[data-kind='changed'] { background: color-mix(in srgb, var(--warning-color, #f9a825) 18%, transparent); color: var(--warning-color, #f9a825); }
+        .change-list span[data-kind='removed'] { background: color-mix(in srgb, var(--error-color) 18%, transparent); color: var(--error-color); }
+        .diff-columns { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .diff-columns h3 { font-size: .85rem; margin: 0 0 6px; }
+        .diff-columns pre { background: var(--code-editor-background-color, var(--secondary-background-color)); border-radius: 8px; box-sizing: border-box; font: .78rem/1.45 var(--ha-font-family-code, monospace); margin: 0; max-height: 360px; overflow: auto; padding: 12px; white-space: pre; }
+        .workbench-actions {
+          align-items: center;
+          background: var(--mdc-theme-surface, var(--card-background-color));
+          border-block-start: 1px solid var(--divider-color);
+          display: flex;
+          gap: 14px;
+          justify-content: space-between;
+          min-height: 64px;
+          padding: 8px 14px;
+          position: sticky;
+          bottom: 0;
+          z-index: 20;
+        }
+        .apply-state { align-items: center; color: var(--secondary-text-color); display: flex; font-size: .85rem; gap: 8px; min-width: 0; }
+        .action-buttons { display: flex; flex-shrink: 0; gap: 6px; }
+        .draft-recovery { margin: 10px 12px 0; }
+        .draft-recovery > div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+        .draft-recovery div > div:first-child { display: grid; gap: 3px; }
+        .draft-recovery span { color: var(--secondary-text-color); }
+        .draft-actions { display: flex; gap: 6px; }
+        .preview-drawer, .preview-scrim { display: none; }
+        .mobile-stage-select { display: none; }
+        .stale-preview-alert { margin-bottom: 16px; }
+        .editor-canvas[data-yaml-invalid='true'] .stage > :not(.stage-heading) {
+          opacity: .68;
+          pointer-events: none;
+        }
+
+        @media (max-width: 1199px) {
+          .preview-toggle { display: inline-flex; }
+          .workbench-body { grid-template-columns: 210px minmax(0, 1fr); }
+          .desktop-preview { display: none; }
+          .preview-scrim {
+            background: rgba(0, 0, 0, .45);
+            display: block;
+            inset: 0;
+            opacity: 0;
+            pointer-events: none;
+            position: fixed;
+            transition: opacity .2s ease;
+            z-index: 98;
+          }
+          .preview-scrim[open] { opacity: 1; pointer-events: auto; }
+          .preview-drawer {
+            background: var(--mdc-theme-surface, var(--card-background-color));
+            box-shadow: -8px 0 28px rgba(0,0,0,.25);
+            display: block;
+            height: 100%;
+            max-width: 380px;
+            overflow: auto;
+            padding: 12px;
+            position: fixed;
+            right: 0;
+            top: 0;
+            transform: translateX(105%);
+            transition: transform .2s ease;
+            width: min(380px, 92vw);
+            z-index: 99;
+          }
+          .preview-drawer[open] { transform: translateX(0); }
+          .drawer-header { align-items: center; display: flex; justify-content: space-between; min-height: 52px; }
+          .preview-drawer #sidebar-preview { margin: auto; max-width: 340px; }
+        }
+
+        @media (max-width: 767px) {
+          .workbench { min-height: calc(100vh - 64px); }
+          .workbench-header { padding-inline: 6px; }
+          .header-status { display: none; }
+          .target-control { flex: 1; overflow: hidden; }
+          .target-control strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .preview-toggle { font-size: 0; min-width: 44px; }
+          .preview-toggle ha-icon { font-size: initial; }
+          .workbench-body { display: block; overflow: auto; }
+          .task-rail { display: none; }
+          .mobile-stage-select { display: block; margin-bottom: 16px; }
+          .editor-canvas { overflow: visible; padding: 12px 12px 110px; }
+          .review-grid, .diff-columns { grid-template-columns: 1fr; }
+          .diff-columns pre { max-width: calc(100vw - 58px); }
+          .workbench-actions { align-items: stretch; flex-direction: column; gap: 6px; padding: 8px; }
+          .apply-state { padding-inline: 6px; }
+          .action-buttons { display: flex; width: 100%; }
+          .action-buttons ha-button:last-child { flex: 1; }
+          .preview-drawer { max-width: none; padding: 8px; width: 100vw; }
+          .yaml-toolbar span { display: none; }
         }
         .loading-content {
           display: flex;

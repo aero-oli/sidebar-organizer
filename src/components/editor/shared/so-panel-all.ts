@@ -24,7 +24,7 @@ import { safeCustomElement } from '@utilities/safe-custom-element';
 import { getStorage, setStorage } from '@utilities/storage-utils';
 import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, TemplateResult, css, nothing, PropertyValues } from 'lit';
-import { property, queryAll } from 'lit/decorators.js';
+import { property, queryAll, state } from 'lit/decorators.js';
 
 import './so-data-item-table';
 import { BaseEditor } from '../../base-editor.js';
@@ -66,6 +66,7 @@ export class SoPanelAll extends BaseEditor {
   @queryAll('ha-expansion-panel') private _expansionPanels!: HTMLElement[];
 
   @property({ attribute: false }) private _showByGroup = false;
+  @state() private _search = '';
 
   public connectedCallback(): void {
     super.connectedCallback();
@@ -84,6 +85,13 @@ export class SoPanelAll extends BaseEditor {
   protected render(): TemplateResult {
     return html`
       <div class="all-panels-wrapper">
+        <ha-textfield
+          class="panel-search"
+          .label=${'Search panels and items'}
+          .value=${this._search}
+          clear-button-visible
+          @input=${(event: Event) => (this._search = (event.target as HTMLInputElement).value)}
+        ></ha-textfield>
         <div class="group-title">
           <div></div>
           <ha-dropdown @wa-select=${this._handleGroupByPanelType}>
@@ -103,7 +111,16 @@ export class SoPanelAll extends BaseEditor {
 
   private _renderPanelsByType(): TemplateResult {
     const newItems = this._dialog._newItems;
-    const panelsWithoutNewItems = this._dialog._initCombiPanels.filter((panel) => !newItems.includes(panel));
+    const matchesSearch = (panel: string) => {
+      const query = this._search.trim().toLocaleLowerCase();
+      if (!query) return true;
+      const info = this._getPanelInfo(panel);
+      return [panel, info.title, info.url_path].some((value) => String(value || '').toLocaleLowerCase().includes(query));
+    };
+    const panelsWithoutNewItems = this._dialog._initCombiPanels.filter(
+      (panel) => !newItems.includes(panel) && matchesSearch(panel)
+    );
+    const filteredNewItems = newItems.filter(matchesSearch);
 
     const systemPanelData = {
       data: {
@@ -115,9 +132,12 @@ export class SoPanelAll extends BaseEditor {
 
     return html`
       ${this._renderTableGrouped(systemPanelData)}
-      ${newItems.length > 0
+      ${panelsWithoutNewItems.length === 0 && filteredNewItems.length === 0
+        ? html`<div class="panel-empty-state">No panels match “${this._search}”. Clear the search to see every item.</div>`
+        : nothing}
+      ${filteredNewItems.length > 0
         ? this._renderTableGrouped({
-            data: { items: newItems, columns: ['group', 'notification'] },
+            data: { items: filteredNewItems, columns: ['group', 'notification'] },
             expansionOptions: this._computeExpansionOptions({
               id: 'new-items',
               header: 'User Created',
@@ -390,6 +410,16 @@ export class SoPanelAll extends BaseEditor {
           position: relative;
           max-height: calc(var(--so-content-fullscreen-max-height) - 48px);
           overflow: auto;
+        }
+        .panel-search {
+          box-sizing: border-box;
+          margin-block-end: var(--side-dialog-gutter);
+          width: 100%;
+        }
+        .panel-empty-state {
+          color: var(--secondary-text-color);
+          padding: 24px 12px;
+          text-align: center;
         }
         .group-title {
           scroll-snap-align: start;

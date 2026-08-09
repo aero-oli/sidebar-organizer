@@ -1,16 +1,12 @@
-import { ALERT_MSG, HA_EVENT, NAMESPACE, NAMESPACE_TITLE, REPO_URL, SLOT, VERSION } from '@constants';
+import { HA_EVENT, NAMESPACE, NAMESPACE_TITLE, REPO_URL, VERSION } from '@constants';
 import { mdiArrowExpand, mdiClose, mdiInformation } from '@mdi/js';
-import { clearSidebarOrganizerStorage } from '@utilities/configs/misc';
 
 import './sidebar-dialog';
 
-import { TRANSLATED_LABEL } from '@utilities/localize';
 import { safeCustomElement } from '@utilities/safe-custom-element';
-import { showConfirmDialog } from '@utilities/show-dialog-box';
 import { SidebarConfigDialogParams } from '@utilities/show-dialog-sidebar-organizer';
-import { getStorageConfig } from '@utilities/storage-utils';
 import { showToast } from '@utilities/toast-notify';
-import { cloneDeep, isEmpty } from 'es-toolkit/compat';
+import { cloneDeep } from 'es-toolkit/compat';
 import { LitElement, TemplateResult, css, html, nothing } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 
@@ -32,7 +28,6 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
 
   @state() _configValid = true;
   @state() _saveDisabled = true;
-  @state() _GUImode = true;
 
   @query('ha-dialog') private _dialog?: HTMLDialogElement;
   @query('sidebar-organizer-config-dialog') private _configDialog!: SidebarConfigDialog;
@@ -56,12 +51,6 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
   }
 
   public closeDialog(): boolean {
-    if (this._isConfigChanged) {
-      // If config is changed and not valid, show confirm dialog
-      this._handleClose();
-      return false;
-    }
-
     this._open = false;
     this._params = undefined;
     fireEvent(this, 'dialog-closed', { dialog: this.localName });
@@ -79,35 +68,6 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
       this._configDialog._invalidConfig === undefined ||
       (this._configValid && Object.keys(this._configDialog._sidebarConfig).length !== 0)
     );
-  }
-
-  private get _isConfigChanged(): boolean {
-    if (!this._params || !this._configDialog || this._configDialog._useConfigFile) {
-      // If using config file, we don't check for changes
-      return false;
-    }
-    return this._configDialog.hasUnsavedChanges;
-  }
-
-  private async _handleClose() {
-    const confirmSaveChange = await showConfirmDialog(this, ALERT_MSG.CONFIG_CHANGED, 'SAVE', 'DISCARD');
-    if (confirmSaveChange) {
-      this._handleSaveConfig();
-    } else {
-      if (isEmpty(this._initConfig) && getStorageConfig()) {
-        // If initial config is empty and there is no config in storage, we clear the config file
-        //info
-        console.log(
-          '%cSIDEBAR-ORGANIZER-DIALOG:%c ℹ️ Init config empty, first setup, but not saving.',
-          'color: #40c057;',
-          'color: #228be6;'
-        );
-
-        clearSidebarOrganizerStorage();
-      }
-      this._dialogClosed();
-    }
-    return;
   }
 
   private _showSuccessToast(): void {
@@ -148,6 +108,7 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
       useConfigFile: useConfigFile,
     };
     fireEvent(this, HA_EVENT.SIDEBAR_CONFIG_SAVED, detail);
+    this._configDialog._markSessionApplied();
     this._dialogClosed();
   }
 
@@ -157,6 +118,7 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
         .hass=${this.hass}
         ._mainDialog=${this}
         ._initConfig=${this._initConfig}
+        @workbench-apply=${this._handleSaveConfig}
       ></sidebar-organizer-config-dialog>
     `;
   }
@@ -165,8 +127,6 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
     if (!this._open) {
       return nothing;
     }
-    const BTN_LABEL = TRANSLATED_LABEL.BTN_LABEL;
-
     const rightHeaderBtns = html`<div slot="actionItems">
       <ha-icon-button .label=${'Toggle large'} .path=${mdiArrowExpand} @click=${this._enlarge}> </ha-icon-button>
       <ha-icon-button
@@ -185,7 +145,7 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
         escapeKeyAction
         @keydown=${this._ignoreKeydown}
         @closed=${this._dialogClosed}
-        .hideActions=${false}
+        .hideActions=${true}
         .flexContent=${true}
         .heading=${NAMESPACE_TITLE}
       >
@@ -200,39 +160,8 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
         </ha-dialog-header>
 
         ${this._renderContent()}
-
-        <ha-button appearance="plain" size="s" slot=${SLOT.SECONDARY_ACTION} @click=${this._toggleCodeUi}
-          >${this._GUImode
-            ? TRANSLATED_LABEL.BTN_LABEL.SHOW_CODE_EDITOR
-            : TRANSLATED_LABEL.BTN_LABEL.SHOW_VISUAL_EDITOR}
-        </ha-button>
-        <div slot=${SLOT.PRIMARY_ACTION}>
-          <ha-button appearance="plain" size="s" .label=${BTN_LABEL.CANCEL} @click=${this.closeDialog}>
-            ${BTN_LABEL.CANCEL}
-          </ha-button>
-          <ha-button
-            appearance="plain"
-            size="s"
-            .label=${BTN_LABEL.SAVE}
-            .title=${this._configDialog?.saveBlockedReason || ''}
-            @click=${this._handleSaveConfig}
-            .disabled=${this._saveDisabled}
-          >
-            ${BTN_LABEL.SAVE}
-          </ha-button>
-        </div>
       </ha-dialog>
     `;
-  }
-
-  private _toggleCodeUi(): void {
-    this._configDialog._toggleCodeEditor();
-    this._GUImode = this._configDialog.GUImode;
-
-    // this._codeUiLabel =
-    //   this._configDialog._tabState === TAB_STATE.CODE
-    //     ? TRANSLATED_LABEL.BTN_LABEL.SHOW_VISUAL_EDITOR
-    //     : TRANSLATED_LABEL.BTN_LABEL.SHOW_CODE_EDITOR;
   }
 
   private _enlarge() {
@@ -246,32 +175,31 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
   static get styles() {
     return css`
       ha-dialog {
-        --mdc-dialog-max-width: 90vw;
-        --mdc-dialog-min-height: 700px;
-        /* --mdc-dialog-min-height: calc(90vh - 72px); */
+        --mdc-dialog-min-width: 96vw;
+        --mdc-dialog-max-width: 96vw;
+        --mdc-dialog-min-height: min(900px, 92vh);
+        --mdc-dialog-max-height: 96vh;
         --dialog-backdrop-filter: blur(2px);
         --justify-action-buttons: space-between;
         --dialog-content-padding: 0 1rem;
       }
       sidebar-organizer-config-dialog {
-        width: calc(90vw - 48px);
-        max-width: 1000px;
+        width: 100%;
+        max-width: none;
         margin-left: auto;
         margin-right: auto;
         display: flex;
         flex-direction: column;
       }
-      :host([large]) ha-dialog {
-        --mdc-dialog-min-width: 90vw;
-        --mdc-dialog-max-width: 90vw;
-      }
+      :host([large]) ha-dialog { --mdc-dialog-min-width: 100vw; --mdc-dialog-max-width: 100vw; --mdc-dialog-max-height: 100vh; }
       :host([large]) ha-dialog sidebar-organizer-config-dialog {
         max-width: none;
         width: 100%;
       }
 
-      @media all and (max-width: 450px), all and (max-height: 500px) {
+      @media all and (max-width: 767px), all and (max-height: 500px) {
         ha-dialog {
+          --dialog-content-padding: 0;
           height: 100%;
           --mdc-dialog-max-height: 100%;
           --dialog-surface-top: 0px;

@@ -1,13 +1,13 @@
-import { SidebarConfig } from '@types';
-
 import { SidebarConfigDialog } from './sidebar-dialog';
 
+/**
+ * Compatibility context for the focused editor components. Editing state is
+ * owned by EditorSessionController; this adapter only exposes the host.
+ */
 export class EditorStore {
-  public editorDialog: SidebarConfigDialog;
-  public sidebarConfig: SidebarConfig;
+  public constructor(public readonly editorDialog: SidebarConfigDialog) {}
 
-  constructor(editorDialog: SidebarConfigDialog, sidebarConfig: SidebarConfig) {
-    this.editorDialog = editorDialog;
-    this.sidebarConfig = sidebarConfig;
+  public get sidebarConfig() {
+    return this.editorDialog._sidebarConfig;
   }
 }

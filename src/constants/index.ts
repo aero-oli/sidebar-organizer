@@ -23,11 +23,6 @@ export enum PATH {
   PROFILE = '/profile',
 }
 
-export enum TAB_STATE {
-  BASE = 'base',
-  CODE = 'codeEditor',
-}
-
 export enum STORAGE {
   UI_CONFIG = 'sidebarOrganizerConfig',
   USE_CONFIG_FILE = 'sidebarOrganizerUseConfigFile',

@@ -3,8 +3,6 @@ export enum DIALOG_TAG {
   COLORS = 'sidebar-dialog-colors',
   PANELS = 'sidebar-dialog-panels',
   PREVIEW = 'sidebar-dialog-preview',
-  CODE_EDITOR = 'sidebar-dialog-code-editor',
-  MENU = 'sidebar-dialog-menu',
 }
 
 export enum CONFIG_SECTION {

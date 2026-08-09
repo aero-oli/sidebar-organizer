@@ -11,6 +11,8 @@ import {
 } from '@constants';
 import {
   mdiChevronLeft,
+  mdiChevronDown,
+  mdiChevronUp,
   mdiDotsVertical,
   mdiDrag,
   mdiEyeOffOutline,
@@ -36,6 +38,7 @@ export class SidebarDialogPanels extends BaseEditor {
     super(CONFIG_SECTION.PANELS);
   }
   @property({ attribute: false }) _sidebarConfig!: SidebarConfig;
+  @property({ attribute: false }) workbenchMode?: 'organize' | 'rules';
 
   @state() private _selectedTab: PANEL_AREA = PANEL_AREA.ALL_ITEMS;
   @state() public _selectedBottom: BOTTOM_SECTION = BOTTOM_SECTION.BOTTOM_ITEMS;
@@ -47,6 +50,9 @@ export class SidebarDialogPanels extends BaseEditor {
   @query('so-panel-all') private _panelAll?: SoPanelAll;
 
   protected willUpdate(_changedProperties: PropertyValues): void {
+    if (_changedProperties.has('workbenchMode')) {
+      this._selectedTab = this.workbenchMode === 'rules' ? PANEL_AREA.VISIBILITY : PANEL_AREA.ALL_ITEMS;
+    }
     if (_changedProperties.has('_selectedTab')) {
       const prevTab = _changedProperties.get('_selectedTab') as PANEL_AREA | undefined;
       const currentTab = this._selectedTab;
@@ -96,9 +102,13 @@ export class SidebarDialogPanels extends BaseEditor {
   }
 
   protected render() {
+    const options =
+      this.workbenchMode === 'rules'
+        ? PanelAreaTabs.filter(({ value }) => value === PANEL_AREA.VISIBILITY || value === PANEL_AREA.NOTIFICATIONS)
+        : PanelAreaTabs;
     const tabSelector = html` <ha-control-select
       .value=${this._selectedTab}
-      .options=${PanelAreaTabs}
+      .options=${options}
       @value-changed=${(ev: CustomEvent) => {
         this._selectedTab = ev.detail.value;
       }}
@@ -113,7 +123,7 @@ export class SidebarDialogPanels extends BaseEditor {
       [PANEL_AREA.NOTIFICATIONS]: this._renderNotificationConfig(),
     };
     return html`
-      <div class="groups-menu-header">${tabSelector}</div>
+      ${this.workbenchMode === 'organize' ? nothing : html`<div class="groups-menu-header">${tabSelector}</div>`}
       <div class="config-content">${panelContent[this._selectedTab]}</div>
     `;
   }
@@ -389,6 +399,18 @@ export class SidebarDialogPanels extends BaseEditor {
         </div>
 
         <div class="group-actions">${this._renderGroupActions(key, isUncategorized)}</div>
+        <ha-icon-button
+          .label=${`Move ${key} up`}
+          .path=${mdiChevronUp}
+          .disabled=${index === 0}
+          @click=${() => this._moveGroup(index, index - 1)}
+        ></ha-icon-button>
+        <ha-icon-button
+          .label=${`Move ${key} down`}
+          .path=${mdiChevronDown}
+          .disabled=${index === Object.keys(this._sidebarConfig.custom_groups || {}).length - 1}
+          @click=${() => this._moveGroup(index, index + 1)}
+        ></ha-icon-button>
       </div>
     `;
   }
@@ -450,6 +472,11 @@ export class SidebarDialogPanels extends BaseEditor {
     updatedConfig({ custom_groups: newCustomGroups });
   }
 
+  private _moveGroup(oldIndex: number, newIndex: number): void {
+    if (newIndex < 0) return;
+    this._groupMoved(new CustomEvent('item-moved', { detail: { oldIndex, newIndex } }));
+  }
+
   private _handleNotifyConfigChange(ev: CustomEvent) {
     const configValue = (ev as any).target.configValue;
     const value = ev.detail.value;
@@ -471,9 +498,8 @@ export class SidebarDialogPanels extends BaseEditor {
 
   private _handleNavigateSection = (ev: CustomEvent) => {
     ev.stopPropagation();
-    const section = ev.detail.section;
-    console.log('Navigate section event received:', section);
-    this._dialog._currSection = section;
+    console.log('Navigate to the integrated custom item editor.');
+    this._dialog.navigateWorkbench('organize');
   };
 
   private _handleGroupActionEvent = async (event: CustomEvent): Promise<void> => {

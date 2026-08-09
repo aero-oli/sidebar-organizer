@@ -56,7 +56,9 @@ The original project remains the foundation of the sidebar UI and is credited be
 - **Per-user profiles**: Gives individual Home Assistant users an optional personal sidebar with the shared configuration as a fallback.
 - **Cross-device synchronization**: Broadcasts shared config, profile, and collapsed-group changes to connected browsers; manual YAML edits are detected without browser polling.
 - **Safer editing**: Validates YAML and schema, rejects stale concurrent writes, writes atomically, keeps previous-version backups, and preserves a user-scoped last-good cache.
-- **Visual and raw editors**: Supports drag-and-drop organization, YAML editing, validation, source diagnostics, and administrator profile management in one dialog.
+- **Guided settings workbench**: Uses directly navigable Sidebar, Organize, Appearance, Rules, YAML, and Review & Apply stages with a responsive live preview.
+- **Recoverable editing**: Keeps device-local drafts per Home Assistant user and target, preserves invalid YAML for repair, and detects stale remote revisions before publishing.
+- **CodeMirror YAML editor**: Provides syntax highlighting, search, folding, bracket matching, diagnostics, and explicit comment-preserving formatting.
 - **Flexible organization**: Groups, reorders, hides, pins, collapses, and moves items into bottom sections or bottom groups.
 - **Appearance controls**: Customizes sidebar colors, width, typography, dividers, header behavior, and light/dark presentation.
 - **New and conditional items**: Adds sidebar entries and supports visibility configuration for more tailored navigation.
@@ -153,10 +155,8 @@ The legacy frontend-only install supports browser storage and `/local/sidebar-or
 ### Configuration dialog
 
 - Open the **Sidebar Organizer** configuration dialog by pressing and holding the Profile menu (the last item in the sidebar), or from the profile page.
-  ![Configuration Section](assets/sidebar-config-section.png)
-- The settings overview links to Settings, Appearance, Panels, and New Items. The dialog also provides a raw YAML editor for the current shared or personal configuration.
-
-  ![Configuration Dialog](assets/config-dialog.gif)
+- Use the persistent task rail to move directly between **Sidebar**, **Organize**, **Appearance**, **Rules**, **YAML**, and **Review & Apply**. On phones the rail becomes a compact stage selector, while preview opens as a full-height sheet.
+- Changes remain a recoverable device-local draft when the dialog closes. Use **Review & Apply** to inspect validation results, a structured summary, the raw YAML comparison, and backup status before publishing. **Discard draft** is the only action that intentionally removes the local draft.
 
 #### Appearance
 
@@ -289,9 +289,11 @@ In this section, you can organize the layout of the sidebar panels by customizin
 
   </details>
 
-#### Raw YAML
+#### YAML workbench
 
-- This section lets you edit the raw YAML configuration used by Sidebar Organizer. You can also download the current configuration as a YAML file.
+- The YAML stage edits the same document as the visual controls through CodeMirror 6. It includes search, folding, bracket matching, syntax diagnostics, and links from the Problems panel to the affected line or visual stage.
+- **Format YAML** is explicit and uses two-space indentation. It preserves comments and unknown keys and never formats automatically. If YAML is temporarily invalid, the exact text remains in the draft while forms and preview show the last valid configuration.
+- Visual changes patch YAML nodes instead of regenerating the entire file, preserving unchanged comments, unknown keys, and key order.
 
 - Sidebar Organizer supports a shared configuration and personal Home Assistant profiles:
 
@@ -307,8 +309,6 @@ In this section, you can organize the layout of the sidebar panels by customizin
 - The Home Assistant config-folder mode uses the `sidebar_organizer` backend integration. The frontend does not send arbitrary file paths by default; the backend owns the configured path.
 
 - See [Sidebar Organizer YAML Schema](docs/sidebar-organizer-config-schema.md) for the validation contract shared by the frontend and backend.
-
-  ![Config RAW Code](assets/config-raw-code.png)
 
 ### Storage, profiles, and synchronization
 
