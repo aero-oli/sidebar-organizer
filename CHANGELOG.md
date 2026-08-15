@@ -1,3 +1,9 @@
+## [4.6.1](https://github.com/aero-oli/sidebar-organizer/compare/v4.6.0...v4.6.1) (2026-08-15)
+
+### Bug Fixes
+
+* keep workbench actions visible ([fcb5889](https://github.com/aero-oli/sidebar-organizer/commit/fcb588965665e48ac6b43a76470ab22093b73823))
+
 ## [4.6.0](https://github.com/aero-oli/sidebar-organizer/compare/v4.5.0...v4.6.0) (2026-08-09)
 
 ### Features
