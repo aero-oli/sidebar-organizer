@@ -253,6 +253,10 @@ export class SidebarOrganizerDialogWA extends LitElement implements HassDialog<S
           width: 100%;
           max-width: 100%;
         }
+        .content > sidebar-organizer-config-dialog {
+          height: 100%;
+          min-height: 0;
+        }
         .content::-webkit-scrollbar {
           width: 10px;
         }

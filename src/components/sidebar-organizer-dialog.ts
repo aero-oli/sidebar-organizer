@@ -184,6 +184,8 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
         --dialog-content-padding: 0 1rem;
       }
       sidebar-organizer-config-dialog {
+        height: min(790px, calc(92vh - 64px));
+        min-height: 0;
         width: 100%;
         max-width: none;
         margin-left: auto;
@@ -193,6 +195,7 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
       }
       :host([large]) ha-dialog { --mdc-dialog-min-width: 100vw; --mdc-dialog-max-width: 100vw; --mdc-dialog-max-height: 100vh; }
       :host([large]) ha-dialog sidebar-organizer-config-dialog {
+        height: calc(100vh - 64px);
         max-width: none;
         width: 100%;
       }
@@ -206,6 +209,7 @@ export class SidebarOrganizerDialog extends LitElement implements HassDialog<Sid
           --mdc-dialog-max-width: 100vw;
         }
         sidebar-organizer-config-dialog {
+          height: calc(100vh - 64px);
           width: 100%;
           max-width: 100%;
         }

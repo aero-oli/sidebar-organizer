@@ -2161,9 +2161,11 @@ export class SidebarConfigDialog extends BaseEditor {
           font: inherit;
         }
         .workbench {
+          box-sizing: border-box;
           display: grid;
           grid-template-rows: auto auto minmax(0, 1fr) auto;
-          min-height: min(790px, calc(96vh - 72px));
+          height: 100%;
+          min-height: 0;
           overflow: hidden;
           width: 100%;
         }
@@ -2399,7 +2401,6 @@ export class SidebarConfigDialog extends BaseEditor {
         }
 
         @media (max-width: 767px) {
-          .workbench { min-height: calc(100vh - 64px); }
           .workbench-header { padding-inline: 6px; }
           .header-status { display: none; }
           .target-control { flex: 1; overflow: hidden; }

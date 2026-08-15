@@ -2504,9 +2504,11 @@ var Rg,Lg,Ng,$g,Bg,Hg={},Gg=[],Ug=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
           font: inherit;
         }
         .workbench {
+          box-sizing: border-box;
           display: grid;
           grid-template-rows: auto auto minmax(0, 1fr) auto;
-          min-height: min(790px, calc(96vh - 72px));
+          height: 100%;
+          min-height: 0;
           overflow: hidden;
           width: 100%;
         }
@@ -2742,7 +2744,6 @@ var Rg,Lg,Ng,$g,Bg,Hg={},Gg=[],Ug=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
         }
 
         @media (max-width: 767px) {
-          .workbench { min-height: calc(100vh - 64px); }
           .workbench-header { padding-inline: 6px; }
           .header-status { display: none; }
           .target-control { flex: 1; overflow: hidden; }
@@ -3104,6 +3105,8 @@ var Rg,Lg,Ng,$g,Bg,Hg={},Gg=[],Ug=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
         --dialog-content-padding: 0 1rem;
       }
       sidebar-organizer-config-dialog {
+        height: min(790px, calc(92vh - 64px));
+        min-height: 0;
         width: 100%;
         max-width: none;
         margin-left: auto;
@@ -3113,6 +3116,7 @@ var Rg,Lg,Ng,$g,Bg,Hg={},Gg=[],Ug=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
       }
       :host([large]) ha-dialog { --mdc-dialog-min-width: 100vw; --mdc-dialog-max-width: 100vw; --mdc-dialog-max-height: 100vh; }
       :host([large]) ha-dialog sidebar-organizer-config-dialog {
+        height: calc(100vh - 64px);
         max-width: none;
         width: 100%;
       }
@@ -3126,6 +3130,7 @@ var Rg,Lg,Ng,$g,Bg,Hg={},Gg=[],Ug=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
           --mdc-dialog-max-width: 100vw;
         }
         sidebar-organizer-config-dialog {
+          height: calc(100vh - 64px);
           width: 100%;
           max-width: 100%;
         }
@@ -3259,6 +3264,10 @@ var Rg,Lg,Ng,$g,Bg,Hg={},Gg=[],Ug=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
           touch-action: pan-y;
           width: 100%;
           max-width: 100%;
+        }
+        .content > sidebar-organizer-config-dialog {
+          height: 100%;
+          min-height: 0;
         }
         .content::-webkit-scrollbar {
           width: 10px;
