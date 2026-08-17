@@ -1,3 +1,9 @@
+## [4.6.2](https://github.com/aero-oli/sidebar-organizer/compare/v4.6.1...v4.6.2) (2026-08-17)
+
+### Bug Fixes
+
+* stop repeated panel change reload prompts ([4e658b3](https://github.com/aero-oli/sidebar-organizer/commit/4e658b391d201a9a0aec777f5857f3f603420bf5))
+
 ## [4.6.1](https://github.com/aero-oli/sidebar-organizer/compare/v4.6.0...v4.6.1) (2026-08-15)
 
 ### Bug Fixes
