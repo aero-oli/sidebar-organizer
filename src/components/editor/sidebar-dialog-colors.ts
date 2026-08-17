@@ -275,7 +275,16 @@ export class SidebarDialogColors extends BaseEditor {
     const DATA = pick(config, [...AppearanceConfigKeys]) as SidebarAppearanceConfig;
     return html`
       <div id="theme-container" style="display: none;"></div>
-      ${createHaForm(this, BASE_APPEARANCE_SCHEMA(DATA), DATA, { configKey: 'appearance' })}
+      <section class="appearance-section general-section">
+        <div class="section-heading">
+          <ha-icon icon="mdi:format-text"></ha-icon>
+          <div>
+            <h2>General</h2>
+            <p>Title, group behaviour and sidebar dimensions.</p>
+          </div>
+        </div>
+        ${createHaForm(this, BASE_APPEARANCE_SCHEMA(DATA), DATA, { configKey: 'appearance' })}
+      </section>
       <div class="color-container">${this._renderColorConfigFields()}</div>
     `;
   }
@@ -361,15 +370,18 @@ export class SidebarDialogColors extends BaseEditor {
       ${colorConfig}
     `;
 
-    return createExpansionPanel({
-      content,
-      options: {
-        expanded: true,
-        header: 'Color Configuration',
-        icon: 'mdi:palette',
-        secondary: 'Customize the colors of the sidebar',
-      },
-    });
+    return html`
+      <section class="appearance-section theme-section">
+        <div class="section-heading">
+          <ha-icon icon="mdi:palette-outline"></ha-icon>
+          <div>
+            <h2>Theme and colours</h2>
+            <p>Choose a theme, force its mode or override individual styles.</p>
+          </div>
+        </div>
+        ${content}
+      </section>
+    `;
   }
 
   private _renderThemePickerRow(): TemplateResult {
@@ -500,12 +512,8 @@ export class SidebarDialogColors extends BaseEditor {
           })}
           ${this._currentConfigValue === configValue
             ? html` <div class="change-format">
-                <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('hex')}
-                  >HEX</ha-button
-                >
-                <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('rgb')}
-                  >RGBA</ha-button
-                >
+                <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('hex')}>HEX</ha-button>
+                <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('rgb')}>RGBA</ha-button>
               </div>`
             : html` <a
                 class="color-picker-box"
@@ -781,10 +789,39 @@ export class SidebarDialogColors extends BaseEditor {
         :host {
           display: flex;
           flex-direction: column;
-          gap: 0.5em;
+          gap: 28px;
           --form-grid-column-count: 2;
         }
-        @media (max-width: 600px) {
+        .appearance-section {
+          border-block-start: 1px solid var(--divider-color);
+          display: grid;
+          gap: 18px;
+          padding-block-start: 22px;
+        }
+        .general-section {
+          border-block-start: 0;
+          padding-block-start: 0;
+        }
+        .section-heading {
+          align-items: flex-start;
+          display: grid;
+          gap: 12px;
+          grid-template-columns: 28px minmax(0, 1fr);
+        }
+        .section-heading ha-icon {
+          color: var(--primary-color);
+        }
+        .section-heading h2 {
+          font-size: 1.05rem;
+          margin: 0;
+        }
+        .section-heading p {
+          color: var(--secondary-text-color);
+          font-size: 0.9rem;
+          line-height: 1.4;
+          margin: 4px 0 0;
+        }
+        @media (max-width: 1499px) {
           :host {
             --form-grid-column-count: unset;
           }

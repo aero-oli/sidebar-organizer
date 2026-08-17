@@ -488,13 +488,19 @@ export class SidebarConfigDialog extends BaseEditor {
     const session = this._session!;
     const issueCount = session.issues.filter((issue) => issue.severity === 'error').length;
     const targetName = this._activeTargetName();
-    const routes: Array<{ route: WorkbenchRoute; label: string; description: string; icon: string }> = [
-      { route: 'sidebar', label: 'Sidebar', description: 'Profile and sync', icon: 'mdi:account-cog-outline' },
-      { route: 'organize', label: 'Organize', description: 'Groups and items', icon: 'mdi:format-list-group' },
-      { route: 'appearance', label: 'Appearance', description: 'Look and behaviour', icon: 'mdi:palette-outline' },
-      { route: 'rules', label: 'Rules', description: 'Visibility and alerts', icon: 'mdi:filter-cog-outline' },
-      { route: 'yaml', label: 'YAML', description: 'Source editor', icon: 'mdi:code-braces' },
-      { route: 'review', label: 'Review & Apply', description: 'Validate and publish', icon: 'mdi:check-decagram-outline' },
+    const routes: Array<{
+      route: WorkbenchRoute;
+      label: string;
+      description: string;
+      icon: string;
+      group: 'configure' | 'advanced';
+    }> = [
+      { route: 'sidebar', label: 'Sidebar', description: 'Profile and sync', icon: 'mdi:account-cog-outline', group: 'configure' },
+      { route: 'organize', label: 'Organize', description: 'Groups and items', icon: 'mdi:format-list-group', group: 'configure' },
+      { route: 'appearance', label: 'Appearance', description: 'Look and behaviour', icon: 'mdi:palette-outline', group: 'configure' },
+      { route: 'rules', label: 'Rules', description: 'Visibility and alerts', icon: 'mdi:filter-cog-outline', group: 'configure' },
+      { route: 'yaml', label: 'YAML', description: 'Source editor', icon: 'mdi:code-braces', group: 'advanced' },
+      { route: 'review', label: 'Review & Apply', description: 'Validate and publish', icon: 'mdi:check-decagram-outline', group: 'advanced' },
     ];
 
     return html`
@@ -502,8 +508,8 @@ export class SidebarConfigDialog extends BaseEditor {
         <header class="workbench-header">
           <button class="target-control" @click=${() => this._goToRoute('sidebar')}>
             <ha-icon icon="mdi:account-circle-outline"></ha-icon>
-            <span><small>Editing sidebar for</small><strong>${targetName}</strong></span>
-            <ha-icon icon="mdi:chevron-down"></ha-icon>
+            <span><small>Configuration</small><strong>${targetName}</strong></span>
+            <span class="change-target">Change</span>
           </button>
           <div class="header-status" aria-live="polite">
             <span class="status-chip" data-state=${session.dirty ? 'draft' : 'saved'}>
@@ -521,15 +527,18 @@ export class SidebarConfigDialog extends BaseEditor {
         ${this._draftOffer ? this._renderDraftRecovery(this._draftOffer) : nothing}
 
         <div class="workbench-body">
-          <nav class="task-rail" aria-label="Settings stages">
+          <nav class="task-rail" aria-label="Settings categories">
+            <span class="rail-label">Configure</span>
             ${routes.map(
-              ({ route, label, description, icon }, index) => html`
+              ({ route, label, description, icon, group }, index) => html`
+                ${index > 0 && routes[index - 1].group !== group
+                  ? html`<span class="rail-label rail-label-spaced">Advanced</span>`
+                  : nothing}
                 <button
                   class="task-link"
                   data-active=${route === this._workbenchRoute}
                   @click=${() => this._goToRoute(route)}
                 >
-                  <span class="stage-number">${index + 1}</span>
                   <ha-icon icon=${icon}></ha-icon>
                   <span><strong>${label}</strong><small>${description}</small></span>
                   ${session.issues.some((issue) => issue.route === route && issue.severity === 'error')
@@ -559,7 +568,10 @@ export class SidebarConfigDialog extends BaseEditor {
             ${this._renderWorkbenchRoute()}
           </main>
 
-          <aside class="desktop-preview" aria-label="Live sidebar preview">${this._renderSidebarPreview()}</aside>
+          <aside class="desktop-preview" aria-label="Live sidebar preview">
+            <div class="preview-heading"><span>Live preview</span><small>Updates as you edit</small></div>
+            ${this._renderSidebarPreview()}
+          </aside>
         </div>
 
         <footer class="workbench-actions">
@@ -2212,6 +2224,12 @@ export class SidebarConfigDialog extends BaseEditor {
           color: var(--secondary-text-color);
           font-size: 0.78rem;
         }
+        .change-target {
+          color: var(--primary-color);
+          font-size: .82rem;
+          font-weight: 600;
+          margin-inline-start: 4px;
+        }
         .header-status {
           display: flex;
           flex: 1;
@@ -2229,77 +2247,83 @@ export class SidebarConfigDialog extends BaseEditor {
         .status-chip[data-state='draft'] { color: var(--warning-color, #f9a825); }
         .status-chip[data-state='error'] { color: var(--error-color); }
         .status-chip[data-state='valid'] { color: var(--success-color, #43a047); }
-        .preview-toggle { display: none; min-height: 44px; }
+        .preview-toggle { display: inline-flex; min-height: 44px; }
         .workbench-body {
           display: grid;
-          grid-template-columns: 220px minmax(0, 1fr) minmax(300px, 360px);
+          grid-template-columns: 232px minmax(0, 1fr);
           min-height: 0;
           overflow: hidden;
         }
         .task-rail {
+          background: color-mix(in srgb, var(--secondary-background-color) 46%, transparent);
           border-inline-end: 1px solid var(--divider-color);
           display: flex;
           flex-direction: column;
           gap: 4px;
           overflow-y: auto;
-          padding: 12px 8px;
+          padding: 18px 12px;
         }
+        .rail-label {
+          color: var(--secondary-text-color);
+          font-size: .72rem;
+          font-weight: 700;
+          letter-spacing: .08em;
+          padding: 0 10px 4px;
+          text-transform: uppercase;
+        }
+        .rail-label-spaced { margin-top: 14px; }
         .task-link {
           align-items: center;
           border-radius: 10px;
           display: grid;
           gap: 8px;
-          grid-template-columns: 24px 24px minmax(0, 1fr) auto;
-          min-height: 56px;
-          padding: 7px 8px;
+          grid-template-columns: 28px minmax(0, 1fr) auto;
+          min-height: 54px;
+          padding: 7px 10px;
           text-align: start;
           width: 100%;
         }
         .task-link[data-active='true'] {
           background: color-mix(in srgb, var(--primary-color) 14%, transparent);
           color: var(--primary-color);
-        }
-        .stage-number {
-          align-items: center;
-          background: var(--secondary-background-color);
-          border-radius: 50%;
-          display: flex !important;
-          font-size: 0.75rem;
-          height: 24px;
-          justify-content: center;
-          width: 24px;
+          box-shadow: inset 3px 0 var(--primary-color);
         }
         .stage-error { color: var(--error-color); }
         .editor-canvas {
           min-width: 0;
           overflow: auto;
-          padding: 20px clamp(14px, 2vw, 28px) 32px;
+          padding: 28px clamp(20px, 4vw, 64px) 48px;
         }
         .desktop-preview {
           background: var(--primary-background-color);
           border-inline-start: 1px solid var(--divider-color);
           min-width: 0;
           overflow: auto;
-          padding: 14px;
+          display: none;
+          padding: 20px;
         }
+        .preview-heading { display: grid; gap: 2px; margin: 0 auto 14px; max-width: 340px; }
+        .preview-heading span { font-weight: 600; }
+        .preview-heading small { color: var(--secondary-text-color); }
         .desktop-preview #sidebar-preview {
           margin-inline: auto;
           max-width: 340px;
           position: sticky;
           top: 0;
         }
-        .stage { display: grid; gap: 18px; }
+        .stage { display: grid; gap: 24px; margin: 0 auto; max-width: 920px; }
         .stage-heading h1 { font-size: 1.55rem; margin: 0; }
         .stage-heading p { color: var(--secondary-text-color); line-height: 1.45; margin: 5px 0 0; }
         .workbench-card {
-          background: var(--card-background-color, var(--mdc-theme-surface));
-          border: 1px solid var(--divider-color);
-          border-radius: 12px;
+          background: transparent;
+          border: 0;
+          border-block-start: 1px solid var(--divider-color);
+          border-radius: 0;
           box-sizing: border-box;
           display: grid;
           gap: 14px;
           min-width: 0;
-          padding: 16px;
+          padding: 22px 0 0;
         }
         .workbench-card h2, .workbench-card p { margin: 0; }
         .card-heading { display: flex; justify-content: space-between; }
@@ -2364,10 +2388,13 @@ export class SidebarConfigDialog extends BaseEditor {
           pointer-events: none;
         }
 
-        @media (max-width: 1199px) {
-          .preview-toggle { display: inline-flex; }
-          .workbench-body { grid-template-columns: 210px minmax(0, 1fr); }
-          .desktop-preview { display: none; }
+        @media (min-width: 1500px) {
+          .workbench-body { grid-template-columns: 232px minmax(0, 1fr) minmax(320px, 380px); }
+          .desktop-preview { display: block; }
+          .preview-toggle { display: none; }
+        }
+
+        @media (max-width: 1499px) {
           .preview-scrim {
             background: rgba(0, 0, 0, .45);
             display: block;
@@ -2398,6 +2425,10 @@ export class SidebarConfigDialog extends BaseEditor {
           .preview-drawer[open] { transform: translateX(0); }
           .drawer-header { align-items: center; display: flex; justify-content: space-between; min-height: 52px; }
           .preview-drawer #sidebar-preview { margin: auto; max-width: 340px; }
+        }
+
+        @media (max-width: 1199px) {
+          .workbench-body { grid-template-columns: 220px minmax(0, 1fr); }
         }
 
         @media (max-width: 767px) {
@@ -2615,16 +2646,14 @@ export class SidebarConfigDialog extends BaseEditor {
         }
         .settings-overview {
           display: grid;
-          gap: 12px;
-          padding: 4px;
+          gap: 20px;
         }
         .settings-card {
-          background: var(--card-background-color, var(--mdc-theme-surface));
-          border: 1px solid var(--divider-color);
-          border-radius: 12px;
+          background: transparent;
+          border: 0;
           display: grid;
           gap: 14px;
-          padding: 16px;
+          padding: 0;
         }
         .settings-card-heading {
           align-items: flex-start;

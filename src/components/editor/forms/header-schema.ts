@@ -62,70 +62,61 @@ export const BASE_APPEARANCE_SCHEMA = memoizeOne((data: SidebarAppearanceConfig)
   const delayDisabled = data?.animation_off === true;
   return [
     {
-      title: 'Appearance Settings',
-      type: 'expandable',
-      expanded: true,
-      flatten: true,
-      icon: 'mdi:format-text',
+      type: 'grid',
       schema: [
         {
-          type: 'grid',
-          schema: [
-            {
-              name: 'header_title',
-              label: 'Sidebar title',
-              helper: 'Text shown at the top of the sidebar.',
-              type: 'string',
-            },
-            ...commonBooleanSchema(['hide_header_toggle', 'animation_off']),
-            ...(!delayDisabled
-              ? [
-                  {
-                    name: 'animation_delay',
-                    label: 'Animation Delay (ms)',
-                    selector: {
-                      number: {
-                        min: 0,
-                        max: 100,
-                        step: 10,
-                        mode: 'slider',
-                        unit_of_measurement: 'ms',
-                      },
-                    },
-                    helper: 'Time between each panel appearing when a group opens. Lower is faster.',
-                    default: 50,
-                    disabled: delayDisabled,
-                  },
-                ]
-              : []),
-            ...commonBooleanSchema(['move_settings_from_fixed', 'force_transparent_background', 'accordion_mode']),
-            {
-              name: 'text_transformation',
-              label: 'Text Transformation',
-              default: 'capitalize',
-              helper: 'Choose how group names are capitalized.',
-              selector: {
-                select: {
-                  mode: 'dropdown',
-                  options: [
-                    ...TextTransformations.map((mode) => ({
-                      value: mode,
-                      label: mode.charAt(0).toUpperCase() + mode.slice(1),
-                    })),
-                  ],
-                },
-              },
-            },
-            {
-              name: 'width',
-              label: 'Custom Width',
-              helper:
-                'Optional sidebar width, for example 300px or 20%. Leave blank to use Home Assistant’s default.',
-              type: 'string',
-            },
-          ] as const,
+          name: 'header_title',
+          label: 'Sidebar title',
+          helper: 'Text shown at the top of the sidebar.',
+          type: 'string',
         },
-      ],
+        ...commonBooleanSchema(['hide_header_toggle', 'animation_off']),
+        ...(!delayDisabled
+          ? [
+              {
+                name: 'animation_delay',
+                label: 'Animation Delay (ms)',
+                selector: {
+                  number: {
+                    min: 0,
+                    max: 100,
+                    step: 10,
+                    mode: 'slider',
+                    unit_of_measurement: 'ms',
+                  },
+                },
+                helper: 'Time between each panel appearing when a group opens. Lower is faster.',
+                default: 50,
+                disabled: delayDisabled,
+              },
+            ]
+          : []),
+        ...commonBooleanSchema(['move_settings_from_fixed', 'force_transparent_background', 'accordion_mode']),
+        {
+          name: 'text_transformation',
+          label: 'Text Transformation',
+          default: 'capitalize',
+          helper: 'Choose how group names are capitalized.',
+          selector: {
+            select: {
+              mode: 'dropdown',
+              options: [
+                ...TextTransformations.map((mode) => ({
+                  value: mode,
+                  label: mode.charAt(0).toUpperCase() + mode.slice(1),
+                })),
+              ],
+            },
+          },
+        },
+        {
+          name: 'width',
+          label: 'Custom Width',
+          helper:
+            'Optional sidebar width, for example 300px or 20%. Leave blank to use Home Assistant’s default.',
+          type: 'string',
+        },
+      ] as const,
     },
   ] as const;
 });

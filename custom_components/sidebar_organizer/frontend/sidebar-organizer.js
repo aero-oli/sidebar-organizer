@@ -807,7 +807,7 @@ const ng={ATTRIBUTE:1,CHILD:2},og=e=>(...t)=>({_$litDirective$:e,values:t});let 
  * Copyright 2020 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-const{I:ug}=ut,fg=()=>document.createComment(""),pg=(e,t,i)=>{const s=e._$AA.parentNode,n=void 0===t?e._$AB:t._$AA;if(void 0===i){const t=s.insertBefore(fg(),n),o=s.insertBefore(fg(),n);i=new ug(t,o,e,e.options)}else{const t=i._$AB.nextSibling,o=i._$AM,r=o!==e;if(r){let t;i._$AQ?.(e),i._$AM=e,void 0!==i._$AP&&(t=e._$AU)!==o._$AU&&i._$AP(t)}if(t!==n||r){let e=i._$AA;for(;e!==t;){const t=e.nextSibling;s.insertBefore(e,n),e=t}}}return i},gg=(e,t,i=e)=>(e._$AI(t,i),e),mg={},bg=(e,t=mg)=>e._$AH=t,_g=e=>e._$AH,vg=e=>{e._$AR(),e._$AA.remove()},yg=(e,t,i)=>{const s=new Map;for(let n=t;n<=i;n++)s.set(e[n],n);return s},wg=og(class extends rg{constructor(e){if(super(e),e.type!==ng.CHILD)throw Error("repeat() can only be used in text expressions")}dt(e,t,i){let s;void 0===i?i=t:void 0!==t&&(s=t);const n=[],o=[];let r=0;for(const t of e)n[r]=s?s(t,r):r,o[r]=i(t,r),r++;return{values:o,keys:n}}render(e,t,i){return this.dt(e,t,i).values}update(e,[t,i,s]){const n=_g(e),{values:o,keys:r}=this.dt(t,i,s);if(!Array.isArray(n))return this.ut=r,o;const a=this.ut??=[],l=[];let c,h,d=0,u=n.length-1,f=0,p=o.length-1;for(;d<=u&&f<=p;)if(null===n[d])d++;else if(null===n[u])u--;else if(a[d]===r[f])l[f]=gg(n[d],o[f]),d++,f++;else if(a[u]===r[p])l[p]=gg(n[u],o[p]),u--,p--;else if(a[d]===r[p])l[p]=gg(n[d],o[p]),pg(e,l[p+1],n[d]),d++,p--;else if(a[u]===r[f])l[f]=gg(n[u],o[f]),pg(e,n[d],n[u]),u--,f++;else if(void 0===c&&(c=yg(r,f,p),h=yg(a,d,u)),c.has(a[d]))if(c.has(a[u])){const t=h.get(r[f]),i=void 0!==t?n[t]:null;if(null===i){const t=pg(e,n[d]);gg(t,o[f]),l[f]=t}else l[f]=gg(i,o[f]),pg(e,n[d],i),n[t]=null;f++}else vg(n[u]),u--;else vg(n[d]),d++;for(;f<=p;){const t=pg(e,l[p+1]);gg(t,o[f]),l[f++]=t}for(;d<=u;){const e=n[d++];null!==e&&vg(e)}return this.ut=r,bg(e,l),Xe}}),xg=[{name:"hide_header_toggle",label:"Hide expand/collapse button",helper:"Remove the header button that opens or closes every sidebar group."},{name:"animation_off",label:"Disable group animation",helper:"Open and close groups immediately instead of animating each panel."},{name:"move_settings_from_fixed",label:"Make Settings movable",helper:"Allow Settings to be placed in a group instead of always staying fixed at the bottom.",default:!1},{name:"force_transparent_background",label:"Transparent sidebar background",helper:"Let the dashboard background show through the sidebar."},{name:"accordion_mode",label:"Keep only one group open",helper:"Opening a group automatically closes the other groups."}],Sg=e=>{e||(e=xg.map(e=>e.name));const t=[];return e.forEach(e=>{const i=xg.find(t=>t.name===e);i&&t.push({name:i.name,label:i.label,helper:i.helper,default:i.default||!1,type:"boolean"})}),t},Og=pn(e=>{const t=!0===e?.animation_off;return[{title:"Appearance Settings",type:"expandable",expanded:!0,flatten:!0,icon:"mdi:format-text",schema:[{type:"grid",schema:[{name:"header_title",label:"Sidebar title",helper:"Text shown at the top of the sidebar.",type:"string"},...Sg(["hide_header_toggle","animation_off"]),...t?[]:[{name:"animation_delay",label:"Animation Delay (ms)",selector:{number:{min:0,max:100,step:10,mode:"slider",unit_of_measurement:"ms"}},helper:"Time between each panel appearing when a group opens. Lower is faster.",default:50,disabled:t}],...Sg(["move_settings_from_fixed","force_transparent_background","accordion_mode"]),{name:"text_transformation",label:"Text Transformation",default:"capitalize",helper:"Choose how group names are capitalized.",selector:{select:{mode:"dropdown",options:[...q.map(e=>({value:e,label:e.charAt(0).toUpperCase()+e.slice(1)}))]}}},{name:"width",label:"Custom Width",helper:"Optional sidebar width, for example 300px or 20%. Leave blank to use Home Assistant’s default.",type:"string"}]}]}]}),kg=["light","dark"],Cg=(e=!1)=>[{name:"custom_theme",title:"Custom Theme & Force Mode",icon:"mdi:palette",type:"expandable",expanded:!0,flatten:!1,schema:[{name:"",type:"grid",flatten:!1,schema:[{name:"theme",label:"Custom Theme",required:!1,selector:{theme:{include_default:!1}}},{name:"mode",label:"Force Mode",required:!1,disabled:e,selector:{select:{mode:"dropdown",options:kg.map(e=>({value:e,label:e.charAt(0).toUpperCase()+e.slice(1)}))}}}]}]}],Ag=["more-info","toggle","navigate","url","perform-action","assist","none"],Eg={tap_action:"Tap behavior",hold_action:"Hold behavior",double_tap_action:"Double tap behavior",icon_tap_action:"Icon tap behavior",icon_hold_action:"Icon hold behavior",icon_double_tap_action:"Icon double tap behavior"},Tg=(e=!1)=>[{name:"",type:"optional_actions",flatten:!0,schema:(e?["hold_action","double_tap_action"]:["tap_action","hold_action","double_tap_action"]).map(e=>({name:e,label:Eg[e],selector:{ui_action:{actions:Ag,default_action:"none"}}}))}],Ig={items:"Individual Items Configuration",groups:"Groups Configuration"},Mg={items:"Select an item",groups:"Select a group"},Pg={groups:"A group entry applies to all panels in the group.",items:"If a panel is included in a group with a visibility setting, the individual panel setting will be ignored in favor of the group setting."};
+const{I:ug}=ut,fg=()=>document.createComment(""),pg=(e,t,i)=>{const s=e._$AA.parentNode,n=void 0===t?e._$AB:t._$AA;if(void 0===i){const t=s.insertBefore(fg(),n),o=s.insertBefore(fg(),n);i=new ug(t,o,e,e.options)}else{const t=i._$AB.nextSibling,o=i._$AM,r=o!==e;if(r){let t;i._$AQ?.(e),i._$AM=e,void 0!==i._$AP&&(t=e._$AU)!==o._$AU&&i._$AP(t)}if(t!==n||r){let e=i._$AA;for(;e!==t;){const t=e.nextSibling;s.insertBefore(e,n),e=t}}}return i},gg=(e,t,i=e)=>(e._$AI(t,i),e),mg={},bg=(e,t=mg)=>e._$AH=t,_g=e=>e._$AH,vg=e=>{e._$AR(),e._$AA.remove()},yg=(e,t,i)=>{const s=new Map;for(let n=t;n<=i;n++)s.set(e[n],n);return s},wg=og(class extends rg{constructor(e){if(super(e),e.type!==ng.CHILD)throw Error("repeat() can only be used in text expressions")}dt(e,t,i){let s;void 0===i?i=t:void 0!==t&&(s=t);const n=[],o=[];let r=0;for(const t of e)n[r]=s?s(t,r):r,o[r]=i(t,r),r++;return{values:o,keys:n}}render(e,t,i){return this.dt(e,t,i).values}update(e,[t,i,s]){const n=_g(e),{values:o,keys:r}=this.dt(t,i,s);if(!Array.isArray(n))return this.ut=r,o;const a=this.ut??=[],l=[];let c,h,d=0,u=n.length-1,f=0,p=o.length-1;for(;d<=u&&f<=p;)if(null===n[d])d++;else if(null===n[u])u--;else if(a[d]===r[f])l[f]=gg(n[d],o[f]),d++,f++;else if(a[u]===r[p])l[p]=gg(n[u],o[p]),u--,p--;else if(a[d]===r[p])l[p]=gg(n[d],o[p]),pg(e,l[p+1],n[d]),d++,p--;else if(a[u]===r[f])l[f]=gg(n[u],o[f]),pg(e,n[d],n[u]),u--,f++;else if(void 0===c&&(c=yg(r,f,p),h=yg(a,d,u)),c.has(a[d]))if(c.has(a[u])){const t=h.get(r[f]),i=void 0!==t?n[t]:null;if(null===i){const t=pg(e,n[d]);gg(t,o[f]),l[f]=t}else l[f]=gg(i,o[f]),pg(e,n[d],i),n[t]=null;f++}else vg(n[u]),u--;else vg(n[d]),d++;for(;f<=p;){const t=pg(e,l[p+1]);gg(t,o[f]),l[f++]=t}for(;d<=u;){const e=n[d++];null!==e&&vg(e)}return this.ut=r,bg(e,l),Xe}}),xg=[{name:"hide_header_toggle",label:"Hide expand/collapse button",helper:"Remove the header button that opens or closes every sidebar group."},{name:"animation_off",label:"Disable group animation",helper:"Open and close groups immediately instead of animating each panel."},{name:"move_settings_from_fixed",label:"Make Settings movable",helper:"Allow Settings to be placed in a group instead of always staying fixed at the bottom.",default:!1},{name:"force_transparent_background",label:"Transparent sidebar background",helper:"Let the dashboard background show through the sidebar."},{name:"accordion_mode",label:"Keep only one group open",helper:"Opening a group automatically closes the other groups."}],Sg=e=>{e||(e=xg.map(e=>e.name));const t=[];return e.forEach(e=>{const i=xg.find(t=>t.name===e);i&&t.push({name:i.name,label:i.label,helper:i.helper,default:i.default||!1,type:"boolean"})}),t},Og=pn(e=>{const t=!0===e?.animation_off;return[{type:"grid",schema:[{name:"header_title",label:"Sidebar title",helper:"Text shown at the top of the sidebar.",type:"string"},...Sg(["hide_header_toggle","animation_off"]),...t?[]:[{name:"animation_delay",label:"Animation Delay (ms)",selector:{number:{min:0,max:100,step:10,mode:"slider",unit_of_measurement:"ms"}},helper:"Time between each panel appearing when a group opens. Lower is faster.",default:50,disabled:t}],...Sg(["move_settings_from_fixed","force_transparent_background","accordion_mode"]),{name:"text_transformation",label:"Text Transformation",default:"capitalize",helper:"Choose how group names are capitalized.",selector:{select:{mode:"dropdown",options:[...q.map(e=>({value:e,label:e.charAt(0).toUpperCase()+e.slice(1)}))]}}},{name:"width",label:"Custom Width",helper:"Optional sidebar width, for example 300px or 20%. Leave blank to use Home Assistant’s default.",type:"string"}]}]}),kg=["light","dark"],Cg=(e=!1)=>[{name:"custom_theme",title:"Custom Theme & Force Mode",icon:"mdi:palette",type:"expandable",expanded:!0,flatten:!1,schema:[{name:"",type:"grid",flatten:!1,schema:[{name:"theme",label:"Custom Theme",required:!1,selector:{theme:{include_default:!1}}},{name:"mode",label:"Force Mode",required:!1,disabled:e,selector:{select:{mode:"dropdown",options:kg.map(e=>({value:e,label:e.charAt(0).toUpperCase()+e.slice(1)}))}}}]}]}],Ag=["more-info","toggle","navigate","url","perform-action","assist","none"],Eg={tap_action:"Tap behavior",hold_action:"Hold behavior",double_tap_action:"Double tap behavior",icon_tap_action:"Icon tap behavior",icon_hold_action:"Icon hold behavior",icon_double_tap_action:"Icon double tap behavior"},Tg=(e=!1)=>[{name:"",type:"optional_actions",flatten:!0,schema:(e?["hold_action","double_tap_action"]:["tap_action","hold_action","double_tap_action"]).map(e=>({name:e,label:Eg[e],selector:{ui_action:{actions:Ag,default_action:"none"}}}))}],Ig={items:"Individual Items Configuration",groups:"Groups Configuration"},Mg={items:"Select an item",groups:"Select a group"},Pg={groups:"A group entry applies to all panels in the group.",items:"If a panel is included in a group with a visibility setting, the individual panel setting will be ignored in favor of the group setting."};
 /**
  * @license
  * Copyright 2017 Google LLC
@@ -915,7 +915,16 @@ const{I:ug}=ut,fg=()=>document.createComment(""),pg=(e,t,i)=>{const s=e._$AA.par
  */
 var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine[ch]|zoo|^ord|^--/i;function zg(e,t){for(var i in t)e[i]=t[i];return e}function Vg(e){var t=e.parentNode;t&&t.removeChild(e)}function Fg(e,t,i){var s,n,o,r,a=arguments;if(t=zg({},t),arguments.length>3)for(i=[i],s=3;s<arguments.length;s++)i.push(a[s]);if(null!=i&&(t.children=i),null!=e&&null!=e.defaultProps)for(n in e.defaultProps)void 0===t[n]&&(t[n]=e.defaultProps[n]);return r=t.key,null!=(o=t.ref)&&delete t.ref,null!=r&&delete t.key,Wg(e,t,r,o)}function Wg(e,t,i,s){var n={type:e,props:t,key:i,ref:s,__k:null,__p:null,__b:0,__e:null,l:null,__c:null,constructor:void 0};return Lg.vnode&&Lg.vnode(n),n}function qg(e){return e.children}function Kg(e){if(null==e||"boolean"==typeof e)return null;if("string"==typeof e||"number"==typeof e)return Wg(null,e,null,null);if(null!=e.__e||null!=e.__c){var t=Wg(e.type,e.props,e.key,null);return t.__e=e.__e,t}return e}function Yg(e,t){this.props=e,this.context=t}function Qg(e,t){if(null==t)return e.__p?Qg(e.__p,e.__p.__k.indexOf(e)+1):null;for(var i;t<e.__k.length;t++)if(null!=(i=e.__k[t])&&null!=i.__e)return i.__e;return"function"==typeof e.type?Qg(e):null}function Xg(e){var t,i;if(null!=(e=e.__p)&&null!=e.__c){for(e.__e=e.__c.base=null,t=0;t<e.__k.length;t++)if(null!=(i=e.__k[t])&&null!=i.__e){e.__e=e.__c.base=i.__e;break}return Xg(e)}}function Jg(e){(!e.__d&&(e.__d=!0)&&1===Ng.push(e)||Bg!==Lg.debounceRendering)&&(Bg=Lg.debounceRendering,(Lg.debounceRendering||$g)(Zg))}function Zg(){var e,t,i,s,n,o,r,a;for(Ng.sort(function(e,t){return t.__v.__b-e.__v.__b});e=Ng.pop();)e.__d&&(i=void 0,s=void 0,o=(n=(t=e).__v).__e,r=t.__P,a=t.u,t.u=!1,r&&(i=[],s=rm(r,n,zg({},n),t.__n,void 0!==r.ownerSVGElement,null,i,a,null==o?Qg(n):o),am(i,n),s!=o&&Xg(n)))}function em(e,t,i,s,n,o,r,a,l){var c,h,d,u,f,p,g,m=i&&i.__k||Ug,b=m.length;if(a==Gg&&(a=null!=o?o[0]:b?Qg(i,0):null),c=0,t.__k=tm(t.__k,function(i){if(null!=i){if(i.__p=t,i.__b=t.__b+1,null===(d=m[c])||d&&i.key==d.key&&i.type===d.type)m[c]=void 0;else for(h=0;h<b;h++){if((d=m[h])&&i.key==d.key&&i.type===d.type){m[h]=void 0;break}d=null}if(u=rm(e,i,d=d||Gg,s,n,o,r,null,a,l),(h=i.ref)&&d.ref!=h&&(g||(g=[])).push(h,i.__c||u,i),null!=u){if(null==p&&(p=u),null!=i.l)u=i.l,i.l=null;else if(o==d||u!=a||null==u.parentNode){e:if(null==a||a.parentNode!==e)e.appendChild(u);else{for(f=a,h=0;(f=f.nextSibling)&&h<b;h+=2)if(f==u)break e;e.insertBefore(u,a)}"option"==t.type&&(e.value="")}a=u.nextSibling,"function"==typeof t.type&&(t.l=u)}}return c++,i}),t.__e=p,null!=o&&"function"!=typeof t.type)for(c=o.length;c--;)null!=o[c]&&Vg(o[c]);for(c=b;c--;)null!=m[c]&&hm(m[c],m[c]);if(g)for(c=0;c<g.length;c++)cm(g[c],g[++c],g[++c])}function tm(e,t,i){if(null==i&&(i=[]),null==e||"boolean"==typeof e)t&&i.push(t(null));else if(Array.isArray(e))for(var s=0;s<e.length;s++)tm(e[s],t,i);else i.push(t?t(Kg(e)):e);return i}function im(e,t,i,s,n){var o;for(o in i)o in t||nm(e,o,null,i[o],s);for(o in t)n&&"function"!=typeof t[o]||"value"===o||"checked"===o||i[o]===t[o]||nm(e,o,t[o],i[o],s)}function sm(e,t,i){"-"===t[0]?e.setProperty(t,i):e[t]="number"==typeof i&&!1===jg.test(t)?i+"px":null==i?"":i}function nm(e,t,i,s,n){var o,r,a,l,c;if("key"===(t=n?"className"===t?"class":t:"class"===t?"className":t)||"children"===t);else if("style"===t)if(o=e.style,"string"==typeof i)o.cssText=i;else{if("string"==typeof s&&(o.cssText="",s=null),s)for(r in s)i&&r in i||sm(o,r,"");if(i)for(a in i)s&&i[a]===s[a]||sm(o,a,i[a])}else"o"===t[0]&&"n"===t[1]?(l=t!==(t=t.replace(/Capture$/,"")),c=t.toLowerCase(),t=(c in e?c:t).slice(2),i?(s||e.addEventListener(t,om,l),(e.t||(e.t={}))[t]=i):e.removeEventListener(t,om,l)):"list"!==t&&"tagName"!==t&&"form"!==t&&!n&&t in e?e[t]=null==i?"":i:"function"!=typeof i&&"dangerouslySetInnerHTML"!==t&&(t!==(t=t.replace(/^xlink:?/,""))?null==i||!1===i?e.removeAttributeNS("http://www.w3.org/1999/xlink",t.toLowerCase()):e.setAttributeNS("http://www.w3.org/1999/xlink",t.toLowerCase(),i):null==i||!1===i?e.removeAttribute(t):e.setAttribute(t,i))}function om(e){return this.t[e.type](Lg.event?Lg.event(e):e)}function rm(e,t,i,s,n,o,r,a,l,c){var h,d,u,f,p,g,m,b,_,v,y=t.type;if(void 0!==t.constructor)return null;(h=Lg.__b)&&h(t);try{e:if("function"==typeof y){if(b=t.props,_=(h=y.contextType)&&s[h.__c],v=h?_?_.props.value:h.__p:s,i.__c?m=(d=t.__c=i.__c).__p=d.__E:("prototype"in y&&y.prototype.render?t.__c=d=new y(b,v):(t.__c=d=new Yg(b,v),d.constructor=y,d.render=dm),_&&_.sub(d),d.props=b,d.state||(d.state={}),d.context=v,d.__n=s,u=d.__d=!0,d.__h=[]),null==d.__s&&(d.__s=d.state),null!=y.getDerivedStateFromProps&&zg(d.__s==d.state?d.__s=zg({},d.__s):d.__s,y.getDerivedStateFromProps(b,d.__s)),u)null==y.getDerivedStateFromProps&&null!=d.componentWillMount&&d.componentWillMount(),null!=d.componentDidMount&&r.push(d);else{if(null==y.getDerivedStateFromProps&&null==a&&null!=d.componentWillReceiveProps&&d.componentWillReceiveProps(b,v),!a&&null!=d.shouldComponentUpdate&&!1===d.shouldComponentUpdate(b,d.__s,v)){for(d.props=b,d.state=d.__s,d.__d=!1,d.__v=t,t.__e=null!=l?l!==i.__e?l:i.__e:null,t.__k=i.__k,h=0;h<t.__k.length;h++)t.__k[h]&&(t.__k[h].__p=t);break e}null!=d.componentWillUpdate&&d.componentWillUpdate(b,d.__s,v)}for(f=d.props,p=d.state,d.context=v,d.props=b,d.state=d.__s,(h=Lg.__r)&&h(t),d.__d=!1,d.__v=t,d.__P=e,h=d.render(d.props,d.state,d.context),t.__k=tm(null!=h&&h.type==qg&&null==h.key?h.props.children:h),null!=d.getChildContext&&(s=zg(zg({},s),d.getChildContext())),u||null==d.getSnapshotBeforeUpdate||(g=d.getSnapshotBeforeUpdate(f,p)),em(e,t,i,s,n,o,r,l,c),d.base=t.__e;h=d.__h.pop();)d.__s&&(d.state=d.__s),h.call(d);u||null==f||null==d.componentDidUpdate||d.componentDidUpdate(f,p,g),m&&(d.__E=d.__p=null)}else t.__e=lm(i.__e,t,i,s,n,o,r,c);(h=Lg.diffed)&&h(t)}catch(e){Lg.__e(e,t,i)}return t.__e}function am(e,t){for(var i;i=e.pop();)try{i.componentDidMount()}catch(e){Lg.__e(e,i.__v)}Lg.__c&&Lg.__c(t)}function lm(e,t,i,s,n,o,r,a){var l,c,h,d,u=i.props,f=t.props;if(n="svg"===t.type||n,null==e&&null!=o)for(l=0;l<o.length;l++)if(null!=(c=o[l])&&(null===t.type?3===c.nodeType:c.localName===t.type)){e=c,o[l]=null;break}if(null==e){if(null===t.type)return document.createTextNode(f);e=n?document.createElementNS("http://www.w3.org/2000/svg",t.type):document.createElement(t.type),o=null}return null===t.type?u!==f&&(null!=o&&(o[o.indexOf(e)]=null),e.data=f):t!==i&&(null!=o&&(o=Ug.slice.call(e.childNodes)),h=(u=i.props||Gg).dangerouslySetInnerHTML,d=f.dangerouslySetInnerHTML,a||(d||h)&&(d&&h&&d.__html==h.__html||(e.innerHTML=d&&d.__html||"")),im(e,f,u,n,a),t.__k=t.props.children,d||em(e,t,i,s,"foreignObject"!==t.type&&n,o,r,Gg,a),a||("value"in f&&void 0!==f.value&&f.value!==e.value&&(e.value=null==f.value?"":f.value),"checked"in f&&void 0!==f.checked&&f.checked!==e.checked&&(e.checked=f.checked))),e}function cm(e,t,i){try{"function"==typeof e?e(t):e.current=t}catch(e){Lg.__e(e,i)}}function hm(e,t,i){var s,n,o;if(Lg.unmount&&Lg.unmount(e),(s=e.ref)&&cm(s,null,t),i||"function"==typeof e.type||(i=null!=(n=e.__e)),e.__e=e.l=null,null!=(s=e.__c)){if(s.componentWillUnmount)try{s.componentWillUnmount()}catch(e){Lg.__e(e,t)}s.base=s.__P=null}if(s=e.__k)for(o=0;o<s.length;o++)s[o]&&hm(s[o],t,i);null!=n&&Vg(n)}function dm(e,t,i){return this.constructor(e,i)}function um(e,t,i){var s,n,o;Lg.__p&&Lg.__p(e,t),n=(s=i===Hg)?null:t.__k,e=Fg(qg,null,[e]),o=[],rm(t,t.__k=e,n||Gg,Gg,void 0!==t.ownerSVGElement,n?null:Ug.slice.call(t.childNodes),o,!1,Gg,s),am(o,e)}function fm(e,t){for(var i=0;i<t.length;i++){var s=t[i];s.enumerable=s.enumerable||!1,s.configurable=!0,"value"in s&&(s.writable=!0),Object.defineProperty(e,s.key,s)}}function pm(e,t,i){return t&&fm(e.prototype,t),e}function gm(){return gm=Object.assign||function(e){for(var t=arguments,i=1;i<arguments.length;i++){var s=t[i];for(var n in s)Object.prototype.hasOwnProperty.call(s,n)&&(e[n]=s[n])}return e},gm.apply(this,arguments)}Lg={},Yg.prototype.setState=function(e,t){var i=this.__s!==this.state&&this.__s||(this.__s=zg({},this.state));("function"!=typeof e||(e=e(i,this.props)))&&zg(i,e),null!=e&&this.__v&&(this.u=!1,t&&this.__h.push(t),Jg(this))},Yg.prototype.forceUpdate=function(e){this.__v&&(e&&this.__h.push(e),this.u=!0,Jg(this))},Yg.prototype.render=qg,Ng=[],$g="function"==typeof Promise?Promise.prototype.then.bind(Promise.resolve()):setTimeout,Bg=Lg.debounceRendering,Lg.__e=function(e,t,i){for(var s;t=t.__p;)if((s=t.__c)&&!s.__p)try{if(s.constructor&&null!=s.constructor.getDerivedStateFromError)s.setState(s.constructor.getDerivedStateFromError(e));else{if(null==s.componentDidCatch)continue;s.componentDidCatch(e)}return Jg(s.__E=s)}catch(t){e=t}throw e},Hg=Gg;var mm="[-\\+]?\\d+%?",bm="[-\\+]?\\d*\\.\\d+%?",_m="(?:"+bm+")|(?:"+mm+")",vm="[\\s|\\(]+("+_m+")[,|\\s]+("+_m+")[,|\\s]+("+_m+")\\s*\\)?",ym="[\\s|\\(]+("+_m+")[,|\\s]+("+_m+")[,|\\s]+("+_m+")[,|\\s]+("+_m+")\\s*\\)?",wm=new RegExp("rgb"+vm),xm=new RegExp("rgba"+ym),Sm=new RegExp("hsl"+vm),Om=new RegExp("hsla"+ym),km="^(?:#?|0x?)",Cm="([0-9a-fA-F]{1})",Am="([0-9a-fA-F]{2})",Em=new RegExp(km+Cm+Cm+Cm+"$"),Tm=new RegExp(km+Cm+Cm+Cm+Cm+"$"),Im=new RegExp(km+Am+Am+Am+"$"),Mm=new RegExp(km+Am+Am+Am+Am+"$"),Pm=2e3,Dm=4e4,Rm=Math.log,Lm=Math.round,Nm=Math.floor;function $m(e,t,i){return Math.min(Math.max(e,t),i)}function Bm(e,t){var i=e.indexOf("%")>-1,s=parseFloat(e);return i?t/100*s:s}function Hm(e){return parseInt(e,16)}function Gm(e){return e.toString(16).padStart(2,"0")}var Um=function(){function e(e,t){this.$={h:0,s:0,v:0,a:1},e&&this.set(e),this.onChange=t,this.initialValue=gm({},this.$)}var t=e.prototype;return t.set=function(t){if("string"==typeof t)/^(?:#?|0x?)[0-9a-fA-F]{3,8}$/.test(t)?this.hexString=t:/^rgba?/.test(t)?this.rgbString=t:/^hsla?/.test(t)&&(this.hslString=t);else{if("object"!=typeof t)throw new Error("Invalid color value");t instanceof e?this.hsva=t.hsva:"r"in t&&"g"in t&&"b"in t?this.rgb=t:"h"in t&&"s"in t&&"v"in t?this.hsv=t:"h"in t&&"s"in t&&"l"in t?this.hsl=t:"kelvin"in t&&(this.kelvin=t.kelvin)}},t.setChannel=function(e,t,i){var s;this[e]=gm({},this[e],((s={})[t]=i,s))},t.reset=function(){this.hsva=this.initialValue},t.clone=function(){return new e(this)},t.unbind=function(){this.onChange=void 0},e.hsvToRgb=function(e){var t=e.h/60,i=e.s/100,s=e.v/100,n=Nm(t),o=t-n,r=s*(1-i),a=s*(1-o*i),l=s*(1-(1-o)*i),c=n%6,h=[l,s,s,a,r,r][c],d=[r,r,l,s,s,a][c];return{r:$m(255*[s,a,r,r,l,s][c],0,255),g:$m(255*h,0,255),b:$m(255*d,0,255)}},e.rgbToHsv=function(e){var t=e.r/255,i=e.g/255,s=e.b/255,n=Math.max(t,i,s),o=Math.min(t,i,s),r=n-o,a=0,l=n,c=0===n?0:r/n;switch(n){case o:a=0;break;case t:a=(i-s)/r+(i<s?6:0);break;case i:a=(s-t)/r+2;break;case s:a=(t-i)/r+4}return{h:60*a%360,s:$m(100*c,0,100),v:$m(100*l,0,100)}},e.hsvToHsl=function(e){var t=e.s/100,i=e.v/100,s=(2-t)*i,n=s<=1?s:2-s,o=n<1e-9?0:t*i/n;return{h:e.h,s:$m(100*o,0,100),l:$m(50*s,0,100)}},e.hslToHsv=function(e){var t=2*e.l,i=e.s*(t<=100?t:200-t)/100,s=t+i<1e-9?0:2*i/(t+i);return{h:e.h,s:$m(100*s,0,100),v:$m((t+i)/2,0,100)}},e.kelvinToRgb=function(e){var t,i,s,n=e/100;return n<66?(t=255,i=-155.25485562709179-.44596950469579133*(i=n-2)+104.49216199393888*Rm(i),s=n<20?0:.8274096064007395*(s=n-10)-254.76935184120902+115.67994401066147*Rm(s)):(t=351.97690566805693+.114206453784165*(t=n-55)-40.25366309332127*Rm(t),i=325.4494125711974+.07943456536662342*(i=n-50)-28.0852963507957*Rm(i),s=255),{r:$m(Nm(t),0,255),g:$m(Nm(i),0,255),b:$m(Nm(s),0,255)}},e.rgbToKelvin=function(t){for(var i,s=t.r,n=t.b,o=Pm,r=Dm;r-o>.4;){i=.5*(r+o);var a=e.kelvinToRgb(i);a.b/a.r>=n/s?r=i:o=i}return i},pm(e,[{key:"hsv",get:function(){var e=this.$;return{h:e.h,s:e.s,v:e.v}},set:function(e){var t=this.$;if(e=gm({},t,e),this.onChange){var i={h:!1,v:!1,s:!1,a:!1};for(var s in t)i[s]=e[s]!=t[s];this.$=e,(i.h||i.s||i.v||i.a)&&this.onChange(this,i)}else this.$=e}},{key:"hsva",get:function(){return gm({},this.$)},set:function(e){this.hsv=e}},{key:"hue",get:function(){return this.$.h},set:function(e){this.hsv={h:e}}},{key:"saturation",get:function(){return this.$.s},set:function(e){this.hsv={s:e}}},{key:"value",get:function(){return this.$.v},set:function(e){this.hsv={v:e}}},{key:"alpha",get:function(){return this.$.a},set:function(e){this.hsv=gm({},this.hsv,{a:e})}},{key:"kelvin",get:function(){return e.rgbToKelvin(this.rgb)},set:function(t){this.rgb=e.kelvinToRgb(t)}},{key:"red",get:function(){return this.rgb.r},set:function(e){this.rgb=gm({},this.rgb,{r:e})}},{key:"green",get:function(){return this.rgb.g},set:function(e){this.rgb=gm({},this.rgb,{g:e})}},{key:"blue",get:function(){return this.rgb.b},set:function(e){this.rgb=gm({},this.rgb,{b:e})}},{key:"rgb",get:function(){var t=e.hsvToRgb(this.$),i=t.r,s=t.g,n=t.b;return{r:Lm(i),g:Lm(s),b:Lm(n)}},set:function(t){this.hsv=gm({},e.rgbToHsv(t),{a:void 0===t.a?1:t.a})}},{key:"rgba",get:function(){return gm({},this.rgb,{a:this.alpha})},set:function(e){this.rgb=e}},{key:"hsl",get:function(){var t=e.hsvToHsl(this.$),i=t.h,s=t.s,n=t.l;return{h:Lm(i),s:Lm(s),l:Lm(n)}},set:function(t){this.hsv=gm({},e.hslToHsv(t),{a:void 0===t.a?1:t.a})}},{key:"hsla",get:function(){return gm({},this.hsl,{a:this.alpha})},set:function(e){this.hsl=e}},{key:"rgbString",get:function(){var e=this.rgb;return"rgb("+e.r+", "+e.g+", "+e.b+")"},set:function(e){var t,i,s,n,o=1;if((t=wm.exec(e))?(i=Bm(t[1],255),s=Bm(t[2],255),n=Bm(t[3],255)):(t=xm.exec(e))&&(i=Bm(t[1],255),s=Bm(t[2],255),n=Bm(t[3],255),o=Bm(t[4],1)),!t)throw new Error("Invalid rgb string");this.rgb={r:i,g:s,b:n,a:o}}},{key:"rgbaString",get:function(){var e=this.rgba;return"rgba("+e.r+", "+e.g+", "+e.b+", "+e.a+")"},set:function(e){this.rgbString=e}},{key:"hexString",get:function(){var e=this.rgb;return"#"+Gm(e.r)+Gm(e.g)+Gm(e.b)},set:function(e){var t,i,s,n,o=255;if((t=Em.exec(e))?(i=17*Hm(t[1]),s=17*Hm(t[2]),n=17*Hm(t[3])):(t=Tm.exec(e))?(i=17*Hm(t[1]),s=17*Hm(t[2]),n=17*Hm(t[3]),o=17*Hm(t[4])):(t=Im.exec(e))?(i=Hm(t[1]),s=Hm(t[2]),n=Hm(t[3])):(t=Mm.exec(e))&&(i=Hm(t[1]),s=Hm(t[2]),n=Hm(t[3]),o=Hm(t[4])),!t)throw new Error("Invalid hex string");this.rgb={r:i,g:s,b:n,a:o/255}}},{key:"hex8String",get:function(){var e=this.rgba;return"#"+Gm(e.r)+Gm(e.g)+Gm(e.b)+Gm(Nm(255*e.a))},set:function(e){this.hexString=e}},{key:"hslString",get:function(){var e=this.hsl;return"hsl("+e.h+", "+e.s+"%, "+e.l+"%)"},set:function(e){var t,i,s,n,o=1;if((t=Sm.exec(e))?(i=Bm(t[1],360),s=Bm(t[2],100),n=Bm(t[3],100)):(t=Om.exec(e))&&(i=Bm(t[1],360),s=Bm(t[2],100),n=Bm(t[3],100),o=Bm(t[4],1)),!t)throw new Error("Invalid hsl string");this.hsl={h:i,s:s,l:n,a:o}}},{key:"hslaString",get:function(){var e=this.hsla;return"hsla("+e.h+", "+e.s+"%, "+e.l+"%, "+e.a+")"},set:function(e){this.hslString=e}}]),e}(),jm={sliderShape:"bar",sliderType:"value",minTemperature:2200,maxTemperature:11e3};function zm(e){var t,i=e.width,s=e.sliderSize,n=e.borderWidth,o=e.handleRadius,r=e.padding,a=e.sliderShape,l="horizontal"===e.layoutDirection;return s=null!=(t=s)?t:2*r+2*o,"circle"===a?{handleStart:e.padding+e.handleRadius,handleRange:i-2*r-2*o,width:i,height:i,cx:i/2,cy:i/2,radius:i/2-n/2}:{handleStart:s/2,handleRange:i-s,radius:s/2,x:0,y:0,width:l?s:i,height:l?i:s}}function Vm(e,t){var i=t.hsva,s=t.rgb;switch(e.sliderType){case"red":return s.r/2.55;case"green":return s.g/2.55;case"blue":return s.b/2.55;case"alpha":return 100*i.a;case"kelvin":var n=e.minTemperature,o=e.maxTemperature-n,r=(t.kelvin-n)/o*100;return Math.max(0,Math.min(r,100));case"hue":return i.h/=3.6;case"saturation":return i.s;default:return i.v}}function Fm(e,t,i){var s,n=zm(e),o=n.handleRange,r=n.handleStart;s="horizontal"===e.layoutDirection?-1*i+o+r:t-r,s=Math.max(Math.min(s,o),0);var a=Math.round(100/o*s);switch(e.sliderType){case"kelvin":var l=e.minTemperature;return l+(e.maxTemperature-l)*(a/100);case"alpha":return a/100;case"hue":return 3.6*a;case"red":case"blue":case"green":return 2.55*a;default:return a}}function Wm(e,t){var i=zm(e),s=i.width,n=i.height,o=i.handleRange,r=i.handleStart,a="horizontal"===e.layoutDirection,l=a?s/2:n/2,c=r+Vm(e,t)/100*o;return a&&(c=-1*c+o+2*r),{x:a?l:c,y:a?c:l}}function qm(e,t){var i=t.hsv,s=t.rgb;switch(e.sliderType){case"red":return[[0,"rgb(0,"+s.g+","+s.b+")"],[100,"rgb(255,"+s.g+","+s.b+")"]];case"green":return[[0,"rgb("+s.r+",0,"+s.b+")"],[100,"rgb("+s.r+",255,"+s.b+")"]];case"blue":return[[0,"rgb("+s.r+","+s.g+",0)"],[100,"rgb("+s.r+","+s.g+",255)"]];case"alpha":return[[0,"rgba("+s.r+","+s.g+","+s.b+",0)"],[100,"rgb("+s.r+","+s.g+","+s.b+")"]];case"kelvin":for(var n=[],o=e.minTemperature,r=e.maxTemperature,a=r-o,l=o,c=0;l<r;l+=a/8,c+=1){var h=Um.kelvinToRgb(l),d=h.r,u=h.g,f=h.b;n.push([12.5*c,"rgb("+d+","+u+","+f+")"])}return n;case"hue":return[[0,"#f00"],[16.666,"#ff0"],[33.333,"#0f0"],[50,"#0ff"],[66.666,"#00f"],[83.333,"#f0f"],[100,"#f00"]];case"saturation":var p=Um.hsvToHsl({h:i.h,s:0,v:i.v}),g=Um.hsvToHsl({h:i.h,s:100,v:i.v});return[[0,"hsl("+p.h+","+p.s+"%,"+p.l+"%)"],[100,"hsl("+g.h+","+g.s+"%,"+g.l+"%)"]];default:var m=Um.hsvToHsl({h:i.h,s:i.s,v:100});return[[0,"#000"],[100,"hsl("+m.h+","+m.s+"%,"+m.l+"%)"]]}}var Km,Ym=2*Math.PI,Qm=function(e,t){return(e%t+t)%t},Xm=function(e,t){return Math.sqrt(e*e+t*t)};function Jm(e){return e.width/2-e.padding-e.handleRadius-e.borderWidth}function Zm(e,t,i){var s=eb(e),n=s.cx,o=s.cy,r=e.width/2;return Xm(n-t,o-i)<r}function eb(e){var t=e.width/2;return{width:e.width,radius:t-e.borderWidth,cx:t,cy:t}}function tb(e,t,i){var s=e.wheelAngle,n=e.wheelDirection;return i&&"clockwise"===n?t=s+t:"clockwise"===n?t=360-s+t:i&&"anticlockwise"===n?t=s+180-t:"anticlockwise"===n&&(t=s-t),Qm(t,360)}function ib(e,t){var i=t.hsv,s=eb(e),n=s.cx,o=s.cy,r=Jm(e),a=(180+tb(e,i.h,!0))*(Ym/360),l=i.s/100*r,c="clockwise"===e.wheelDirection?-1:1;return{x:n+l*Math.cos(a)*c,y:o+l*Math.sin(a)*c}}function sb(e,t,i){var s=eb(e),n=s.cx,o=s.cy,r=Jm(e);t=n-t,i=o-i;var a=tb(e,Math.atan2(-i,-t)*(360/Ym)),l=Math.min(Xm(t,i),r);return{h:Math.round(a),s:Math.round(100/r*l)}}function nb(e){var t=e.width,i=e.boxHeight;return{width:t,height:null!=i?i:t,radius:e.padding+e.handleRadius}}function ob(e,t,i){var s=nb(e),n=s.width,o=s.height,r=s.radius,a=(t-r)/(n-2*r)*100,l=(i-r)/(o-2*r)*100;return{s:Math.max(0,Math.min(a,100)),v:Math.max(0,Math.min(100-l,100))}}function rb(e,t){var i=nb(e),s=i.width,n=i.height,o=i.radius,r=t.hsv,a=o,l=s-2*o,c=n-2*o;return{x:a+r.s/100*l,y:a+(c-r.v/100*c)}}function ab(e,t){return[[[0,"#fff"],[100,"hsl("+t.hue+",100%,50%)"]],[[0,"rgba(0,0,0,0)"],[100,"#000"]]]}function lb(e){Km||(Km=document.getElementsByTagName("base"));var t=window.navigator.userAgent,i=/^((?!chrome|android).)*safari/i.test(t),s=/iPhone|iPod|iPad/i.test(t),n=window.location;return(i||s)&&Km.length>0?n.protocol+"//"+n.host+n.pathname+n.search+e:e}function cb(e,t,i,s){for(var n=0;n<s.length;n++){var o=s[n].x-t,r=s[n].y-i;if(Math.sqrt(o*o+r*r)<e.handleRadius)return n}return null}function hb(e){return{boxSizing:"border-box",border:e.borderWidth+"px solid "+e.borderColor}}function db(e,t,i){return e+"-gradient("+t+", "+i.map(function(e){var t=e[0];return e[1]+" "+t+"%"}).join(",")+")"}function ub(e){return"string"==typeof e?e:e+"px"}var fb={width:300,height:300,color:"#fff",colors:[],padding:6,layoutDirection:"vertical",borderColor:"#fff",borderWidth:0,handleRadius:8,activeHandleRadius:null,handleSvg:null,handleProps:{x:0,y:0},wheelLightness:!0,wheelAngle:0,wheelDirection:"anticlockwise",sliderSize:null,sliderMargin:12,boxHeight:null},pb=["mousemove","touchmove","mouseup","touchend"],gb=function(e){function t(t){e.call(this,t),this.uid=(Math.random()+1).toString(36).substring(5)}return e&&(t.__proto__=e),t.prototype=Object.create(e&&e.prototype),t.prototype.constructor=t,t.prototype.render=function(e){var t=this.handleEvent.bind(this),i={onMouseDown:t,ontouchstart:t},s="horizontal"===e.layoutDirection,n=null===e.margin?e.sliderMargin:e.margin,o={overflow:"visible",display:s?"inline-block":"block"};return e.index>0&&(o[s?"marginLeft":"marginTop"]=n),Fg(qg,null,e.children(this.uid,i,o))},t.prototype.handleEvent=function(e){var t=this,i=this.props.onInput,s=this.base.getBoundingClientRect();e.preventDefault();var n=e.touches?e.changedTouches[0]:e,o=n.clientX-s.left,r=n.clientY-s.top;switch(e.type){case"mousedown":case"touchstart":!1!==i(o,r,0)&&pb.forEach(function(e){document.addEventListener(e,t,{passive:!1})});break;case"mousemove":case"touchmove":i(o,r,1);break;case"mouseup":case"touchend":i(o,r,2),pb.forEach(function(e){document.removeEventListener(e,t,{passive:!1})})}},t}(Yg);function mb(e){var t=e.r,i=e.url,s=t,n=t;return Fg("svg",{className:"IroHandle IroHandle--"+e.index+" "+(e.isActive?"IroHandle--isActive":""),style:{"-webkit-tap-highlight-color":"rgba(0, 0, 0, 0);",transform:"translate("+ub(e.x)+", "+ub(e.y)+")",willChange:"transform",top:ub(-t),left:ub(-t),width:ub(2*t),height:ub(2*t),position:"absolute",overflow:"visible"}},i&&Fg("use",Object.assign({xlinkHref:lb(i)},e.props)),!i&&Fg("circle",{cx:s,cy:n,r:t,fill:"none","stroke-width":2,stroke:"#000"}),!i&&Fg("circle",{cx:s,cy:n,r:t-2,fill:e.fill,"stroke-width":2,stroke:"#fff"}))}function bb(e){var t=e.activeIndex,i=void 0!==t&&t<e.colors.length?e.colors[t]:e.color,s=zm(e),n=s.width,o=s.height,r=s.radius,a=Wm(e,i),l=qm(e,i);return Fg(gb,Object.assign({},e,{onInput:function(t,s,n){var o=Fm(e,t,s);e.parent.inputActive=!0,i[e.sliderType]=o,e.onInput(n,e.id)}}),function(t,s,c){return Fg("div",Object.assign({},s,{className:"IroSlider",style:Object.assign({},{position:"relative",width:ub(n),height:ub(o),borderRadius:ub(r),background:"conic-gradient(#ccc 25%, #fff 0 50%, #ccc 0 75%, #fff 0)",backgroundSize:"8px 8px"},c)}),Fg("div",{className:"IroSliderGradient",style:Object.assign({},{position:"absolute",top:0,left:0,width:"100%",height:"100%",borderRadius:ub(r),background:db("linear","horizontal"===e.layoutDirection?"to top":"to right",l)},hb(e))}),Fg(mb,{isActive:!0,index:i.index,r:e.handleRadius,url:e.handleSvg,props:e.handleProps,x:a.x,y:a.y}))})}function _b(e){var t=nb(e),i=t.width,s=t.height,n=t.radius,o=e.colors,r=e.parent,a=e.activeIndex,l=void 0!==a&&a<e.colors.length?e.colors[a]:e.color,c=ab(e,l),h=o.map(function(t){return rb(e,t)});return Fg(gb,Object.assign({},e,{onInput:function(t,i,s){if(0===s){var n=cb(e,t,i,h);null!==n?r.setActiveColor(n):(r.inputActive=!0,l.hsv=ob(e,t,i),e.onInput(s,e.id))}else 1===s&&(r.inputActive=!0,l.hsv=ob(e,t,i));e.onInput(s,e.id)}}),function(t,r,a){return Fg("div",Object.assign({},r,{className:"IroBox",style:Object.assign({},{width:ub(i),height:ub(s),position:"relative"},a)}),Fg("div",{className:"IroBox",style:Object.assign({},{width:"100%",height:"100%",borderRadius:ub(n)},hb(e),{background:db("linear","to bottom",c[1])+","+db("linear","to right",c[0])})}),o.filter(function(e){return e!==l}).map(function(t){return Fg(mb,{isActive:!1,index:t.index,fill:t.hslString,r:e.handleRadius,url:e.handleSvg,props:e.handleProps,x:h[t.index].x,y:h[t.index].y})}),Fg(mb,{isActive:!0,index:l.index,fill:l.hslString,r:e.activeHandleRadius||e.handleRadius,url:e.handleSvg,props:e.handleProps,x:h[l.index].x,y:h[l.index].y}))})}mb.defaultProps={fill:"none",x:0,y:0,r:8,url:null,props:{x:0,y:0}},bb.defaultProps=Object.assign({},jm);var vb="conic-gradient(red, yellow, lime, aqua, blue, magenta, red)",yb="conic-gradient(red, magenta, blue, aqua, lime, yellow, red)";function wb(e){var t=eb(e).width,i=e.colors;e.borderWidth;var s=e.parent,n=e.color,o=n.hsv,r=i.map(function(t){return ib(e,t)}),a={position:"absolute",top:0,left:0,width:"100%",height:"100%",borderRadius:"50%",boxSizing:"border-box"};return Fg(gb,Object.assign({},e,{onInput:function(t,i,o){if(0===o){if(!Zm(e,t,i))return!1;var a=cb(e,t,i,r);null!==a?s.setActiveColor(a):(s.inputActive=!0,n.hsv=sb(e,t,i),e.onInput(o,e.id))}else 1===o&&(s.inputActive=!0,n.hsv=sb(e,t,i));e.onInput(o,e.id)}}),function(s,l,c){return Fg("div",Object.assign({},l,{className:"IroWheel",style:Object.assign({},{width:ub(t),height:ub(t),position:"relative"},c)}),Fg("div",{className:"IroWheelHue",style:Object.assign({},a,{transform:"rotateZ("+(e.wheelAngle+90)+"deg)",background:"clockwise"===e.wheelDirection?vb:yb})}),Fg("div",{className:"IroWheelSaturation",style:Object.assign({},a,{background:"radial-gradient(circle closest-side, #fff, transparent)"})}),e.wheelLightness&&Fg("div",{className:"IroWheelLightness",style:Object.assign({},a,{background:"#000",opacity:1-o.v/100})}),Fg("div",{className:"IroWheelBorder",style:Object.assign({},a,hb(e))}),i.filter(function(e){return e!==n}).map(function(t){return Fg(mb,{isActive:!1,index:t.index,fill:t.hslString,r:e.handleRadius,url:e.handleSvg,props:e.handleProps,x:r[t.index].x,y:r[t.index].y})}),Fg(mb,{isActive:!0,index:n.index,fill:n.hslString,r:e.activeHandleRadius||e.handleRadius,url:e.handleSvg,props:e.handleProps,x:r[n.index].x,y:r[n.index].y}))})}function xb(e){var t=function(t,i){var s,n=document.createElement("div");function o(){var e=t instanceof Element?t:document.querySelector(t);e.appendChild(s.base),s.onMount(e)}return um(Fg(e,Object.assign({},{ref:function(e){return s=e}},i)),n),"loading"!==document.readyState?o():document.addEventListener("DOMContentLoaded",o),s};return t.prototype=e.prototype,Object.assign(t,e),t.__component=e,t}var Sb=function(e){function t(t){var i=this;e.call(this,t),this.colors=[],this.inputActive=!1,this.events={},this.activeEvents={},this.deferredEvents={},this.id=t.id,(t.colors.length>0?t.colors:[t.color]).forEach(function(e){return i.addColor(e)}),this.setActiveColor(0),this.state=Object.assign({},t,{color:this.color,colors:this.colors,layout:t.layout})}return e&&(t.__proto__=e),t.prototype=Object.create(e&&e.prototype),t.prototype.constructor=t,t.prototype.addColor=function(e,t){void 0===t&&(t=this.colors.length);var i=new Um(e,this.onColorChange.bind(this));this.colors.splice(t,0,i),this.colors.forEach(function(e,t){return e.index=t}),this.state&&this.setState({colors:this.colors}),this.deferredEmit("color:init",i)},t.prototype.removeColor=function(e){var t=this.colors.splice(e,1)[0];t.unbind(),this.colors.forEach(function(e,t){return e.index=t}),this.state&&this.setState({colors:this.colors}),t.index===this.color.index&&this.setActiveColor(0),this.emit("color:remove",t)},t.prototype.setActiveColor=function(e){this.color=this.colors[e],this.state&&this.setState({color:this.color}),this.emit("color:setActive",this.color)},t.prototype.setColors=function(e,t){var i=this;void 0===t&&(t=0),this.colors.forEach(function(e){return e.unbind()}),this.colors=[],e.forEach(function(e){return i.addColor(e)}),this.setActiveColor(t),this.emit("color:setAll",this.colors)},t.prototype.on=function(e,t){var i=this,s=this.events;(Array.isArray(e)?e:[e]).forEach(function(e){(s[e]||(s[e]=[])).push(t),i.deferredEvents[e]&&(i.deferredEvents[e].forEach(function(e){t.apply(null,e)}),i.deferredEvents[e]=[])})},t.prototype.off=function(e,t){var i=this;(Array.isArray(e)?e:[e]).forEach(function(e){var s=i.events[e];s&&s.splice(s.indexOf(t),1)})},t.prototype.emit=function(e){for(var t=this,i=[],s=arguments.length-1;s-- >0;)i[s]=arguments[s+1];var n=this.activeEvents;!!n.hasOwnProperty(e)&&n[e]||(n[e]=!0,(this.events[e]||[]).forEach(function(e){return e.apply(t,i)}),n[e]=!1)},t.prototype.deferredEmit=function(e){for(var t,i=[],s=arguments.length-1;s-- >0;)i[s]=arguments[s+1];var n=this.deferredEvents;(t=this).emit.apply(t,[e].concat(i)),(n[e]||(n[e]=[])).push(i)},t.prototype.setOptions=function(e){this.setState(e)},t.prototype.resize=function(e){this.setOptions({width:e})},t.prototype.reset=function(){this.colors.forEach(function(e){return e.reset()}),this.setState({colors:this.colors})},t.prototype.onMount=function(e){this.el=e,this.deferredEmit("mount",this)},t.prototype.onColorChange=function(e,t){this.setState({color:this.color}),this.inputActive&&(this.inputActive=!1,this.emit("input:change",e,t)),this.emit("color:change",e,t)},t.prototype.emitInputEvent=function(e,t){0===e?this.emit("input:start",this.color,t):1===e?this.emit("input:move",this.color,t):2===e&&this.emit("input:end",this.color,t)},t.prototype.render=function(e,t){var i=this,s=t.layout;return Array.isArray(s)||(s=[{component:wb},{component:bb}],t.transparency&&s.push({component:bb,options:{sliderType:"alpha"}})),Fg("div",{class:"IroColorPicker",id:t.id,style:{display:t.display}},s.map(function(e,s){var n=e.component,o=e.options;return Fg(n,Object.assign({},t,o,{ref:void 0,onInput:i.emitInputEvent.bind(i),parent:i,index:s}))}))},t}(Yg);Sb.defaultProps=Object.assign({},fb,{colors:[],display:"block",id:null,layout:"default",margin:null});var Ob,kb=xb(Sb);!function(e){var t;e.version="5.5.2",e.Color=Um,e.ColorPicker=kb,(t=e.ui||(e.ui={})).h=Fg,t.ComponentBase=gb,t.Handle=mb,t.Slider=bb,t.Wheel=wb,t.Box=_b}(Ob||(Ob={}));var Cb,Ab=Ob;!function(e){e[e.LOADING=1]="LOADING",e[e.READY=2]="READY",e[e.ERROR=3]="ERROR"}(Cb||(Cb={}));let Eb=class extends dg{constructor(){super(h.APPEARANCE),this._picker=null,this._baseColorFromTheme={},this._state=Cb.LOADING,this._initColor="",this._initCustomStyles={},this._supportedModes=[]}connectedCallback(){super.connectedCallback()}firstUpdated(e){if(super.firstUpdated(e),!this._sidebarConfig)return;const t=te(this._sidebarConfig.color_config,this.hass);this._colorConfigMode=t?"dark":"light"}shouldUpdate(e){return!e.has("_colorConfigMode")||void 0===this._colorConfigMode||(this._setTheme(this._colorConfigMode),this._state=Cb.LOADING,this._initCustomStyles={...this._sidebarConfig.color_config?.[this._colorConfigMode]?.custom_styles||{}},setTimeout(()=>{this._state=Cb.READY},200),!0)}updated(e){if(super.updated(e),e.has("_currentConfigValue")&&void 0!==this._currentConfigValue?setTimeout(()=>{this._initColorPicker()},50):e.has("_currentConfigValue")&&void 0===this._currentConfigValue&&this._destroyColorPicker(),e.has("_state")&&this._state===Cb.READY&&this._getYamlEditor(),e.has("_sidebarConfig")&&this._sidebarConfig){const t=e.get("_sidebarConfig")?.color_config?.custom_theme,i=this._sidebarConfig.color_config?.custom_theme;if(t&&i&&t.theme&&t.theme!==i.theme)if(this._supportsMode(i.theme)){const e=this._getSupportedModes(i.theme);this._supportedModes=e,1===e.length?this._colorConfigMode=e[0]:this._colorConfigMode=i.mode||(this.hass.themes.darkMode?"dark":"light")}else{const e=/dark/i,t=/light/i.test(i.theme),s=e.test(i.theme);this._colorConfigMode=t?"light":s||this.hass.themes.darkMode?"dark":"light",this._supportedModes=[]}t&&i&&t.mode!==i.mode&&(this._colorConfigMode=i.mode||(this.hass.themes.darkMode?"dark":"light"))}}_supportsMode(e){return e in this.hass.themes.themes&&(void 0!==this.hass.themes.themes[e].modes&&("modes"in this.hass.themes.themes[e]&&this.hass.themes.themes[e].modes&&Object.keys(this.hass.themes.themes[e].modes).length>0))}_getSupportedModes(e){return this._supportsMode(e)?Object.keys(this.hass.themes.themes[e].modes):[]}_getYamlEditor(){const e=this.shadowRoot?.querySelector("ha-yaml-editor");e&&(this._yamlEditor=e)}_getDefaultColors(){const e=this.shadowRoot?.getElementById("theme-container");if(!e)return;const t=pu(e);this._baseColorFromTheme=t}_destroyColorPicker(){this._picker=null;const e=this.shadowRoot?.querySelector(".picker-wrapper"),t=this.shadowRoot?.getElementById("picker");e&&t&&(e.setAttribute("hidden",""),t.innerHTML="")}_initColorPicker(){const e=void 0!==this._currentConfigValue,t=this.shadowRoot?.querySelector(".picker-wrapper"),i=this.shadowRoot?.getElementById("picker");if(!t||!i)return;t.toggleAttribute("hidden",!e);const s=this._colorConfigMode,n=this._sidebarConfig.color_config?.[s]||{},o=this._currentConfigValue,r=kd(n[o]||this._baseColorFromTheme[o]),a="hex"===r.getFormat()?r.toHex8String():r.toRgbString();this._initColor=n[o]??void 0,this._picker=Ab.ColorPicker(i,{width:150,color:a,borderWidth:1,borderColor:"#fff",layoutDirection:"horizontal",layout:[{component:Ab.ui.Wheel,options:{}},{component:Ab.ui.Slider,options:{sliderType:"hue"}},{component:Ab.ui.Slider,options:{sliderType:"saturation"}},{component:Ab.ui.Slider,options:{sliderType:"value"}},{component:Ab.ui.Slider,options:{sliderType:"alpha"}}]}),this._picker.on(["color:init","color:change"],e=>{this._currentConfigValue=o;const t=this._picker?.props.color,i="hex"===kd(t).getFormat()?e.hex8String:e.rgbaString;this._handleConfigChange(this._currentConfigValue,i)})}_handleConfigChange(e,t){const i=this._colorConfigMode,s={...this._sidebarConfig.color_config||{}},n={...s[i]||{}};n[e]=t,this._sidebarConfig={...this._sidebarConfig,color_config:{...s,[i]:n}},this._dispatchConfig(this._sidebarConfig)}_setTheme(e){const t=this._sidebarConfig?.color_config?.custom_theme?.theme||this.hass.themes.theme,i=this.shadowRoot?.getElementById("theme-container");X(i,this.hass,t,e),setTimeout(()=>{this._getDefaultColors(),this._initCustomStyles=this._sidebarConfig.color_config?.[e]?.custom_styles||[]},0),this._dialog._dialogPreview&&this._dialog._dialogPreview._colorConfigMode!==e&&(this._dialog._dialogPreview._colorConfigMode=e)}render(){const e=tn({...this._sidebarConfig||{}},[...K]);return Qe`
       <div id="theme-container" style="display: none;"></div>
-      ${Eu(this,Og(e),e,{configKey:"appearance"})}
+      <section class="appearance-section general-section">
+        <div class="section-heading">
+          <ha-icon icon="mdi:format-text"></ha-icon>
+          <div>
+            <h2>General</h2>
+            <p>Title, group behaviour and sidebar dimensions.</p>
+          </div>
+        </div>
+        ${Eu(this,Og(e),e,{configKey:"appearance"})}
+      </section>
       <div class="color-container">${this._renderColorConfigFields()}</div>
     `}_renderBorderRadiusField(){return Qe`
       <div class="color-item">
@@ -958,7 +967,18 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
     `,l=xt({content:a,options:{expanded:!1,header:"Custom colors and styles",darkBg:!0}}),c=Qe`
       <div>${t} ${o}</div>
       ${l}
-    `;return xt({content:c,options:{expanded:!0,header:"Color Configuration",icon:"mdi:palette",secondary:"Customize the colors of the sidebar"}})}_renderThemePickerRow(){const e={...this._sidebarConfig?.color_config?.custom_theme||{}},t=this._colorConfigMode,i={custom_theme:{...e}},s=this._supportedModes,n=e=>s.length>0&&!s.includes(e),o=Qe` <div class="header-row">
+    `;return Qe`
+      <section class="appearance-section theme-section">
+        <div class="section-heading">
+          <ha-icon icon="mdi:palette-outline"></ha-icon>
+          <div>
+            <h2>Theme and colours</h2>
+            <p>Choose a theme, force its mode or override individual styles.</p>
+          </div>
+        </div>
+        ${c}
+      </section>
+    `}_renderThemePickerRow(){const e={...this._sidebarConfig?.color_config?.custom_theme||{}},t=this._colorConfigMode,i={custom_theme:{...e}},s=this._supportedModes,n=e=>s.length>0&&!s.includes(e),o=Qe` <div class="header-row">
       <div class="title">Select mode to edit:</div>
       <div class="inputs">
         <ha-formfield .label=${"Light Mode"} .disabled=${n("light")}>
@@ -995,12 +1015,8 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
 
           ${this._createPicker({label:t,value:r,configValue:e,placeHolder:n[e],modeConfig:i,pickerType:"text"})}
           ${this._currentConfigValue===e?Qe` <div class="change-format">
-                <ha-button appearance="plain" size="s" @click=${()=>this._handleColorPicker("hex")}
-                  >HEX</ha-button
-                >
-                <ha-button appearance="plain" size="s" @click=${()=>this._handleColorPicker("rgb")}
-                  >RGBA</ha-button
-                >
+                <ha-button appearance="plain" size="s" @click=${()=>this._handleColorPicker("hex")}>HEX</ha-button>
+                <ha-button appearance="plain" size="s" @click=${()=>this._handleColorPicker("rgb")}>RGBA</ha-button>
               </div>`:Qe` <a
                 class="color-picker-box"
                 style=${cg(c)}
@@ -1045,10 +1061,39 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
         :host {
           display: flex;
           flex-direction: column;
-          gap: 0.5em;
+          gap: 28px;
           --form-grid-column-count: 2;
         }
-        @media (max-width: 600px) {
+        .appearance-section {
+          border-block-start: 1px solid var(--divider-color);
+          display: grid;
+          gap: 18px;
+          padding-block-start: 22px;
+        }
+        .general-section {
+          border-block-start: 0;
+          padding-block-start: 0;
+        }
+        .section-heading {
+          align-items: flex-start;
+          display: grid;
+          gap: 12px;
+          grid-template-columns: 28px minmax(0, 1fr);
+        }
+        .section-heading ha-icon {
+          color: var(--primary-color);
+        }
+        .section-heading h2 {
+          font-size: 1.05rem;
+          margin: 0;
+        }
+        .section-heading p {
+          color: var(--secondary-text-color);
+          font-size: 0.9rem;
+          line-height: 1.4;
+          margin: 4px 0 0;
+        }
+        @media (max-width: 1499px) {
           :host {
             --form-grid-column-count: unset;
           }
@@ -2203,13 +2248,13 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
         <div class="loading-content">
           <ha-fade-in .delay=${500}><ha-spinner size="large"></ha-spinner></ha-fade-in>
         </div>
-      `}_ensureSession(){const e="home_assistant_profile"===this._configSource?this._selectedProfile:"shared",t=`${this.hass.user?.id||"anonymous"}:${this._configSource}:${e}:${this._baselineRevision||""}`;if(this._session&&this._sessionIdentity===t)return;this._session?.destroy(),this._sessionIdentity=t,this._session=new ZR({userId:this.hass.user?.id||"anonymous",source:this._configSource,target:e,baselineRevision:this._baselineRevision,rawYaml:this._baselineRawYaml||this._rawYaml,config:this._sidebarConfig,activeRoute:this._workbenchRoute,onChange:e=>{this._workbenchRoute=e.activeRoute,this._mainDialog._configValid=!e.issues.some(e=>"error"===e.severity),this._mainDialog._saveDisabled=Boolean(this.saveBlockedReason),this.requestUpdate()}});const i=this._session.draftState();this._draftOffer="none"===i.state?void 0:i}_renderWorkbench(){const e=this._session,t=e.issues.filter(e=>"error"===e.severity).length,i=this._activeTargetName(),s=[{route:"sidebar",label:"Sidebar",description:"Profile and sync",icon:"mdi:account-cog-outline"},{route:"organize",label:"Organize",description:"Groups and items",icon:"mdi:format-list-group"},{route:"appearance",label:"Appearance",description:"Look and behaviour",icon:"mdi:palette-outline"},{route:"rules",label:"Rules",description:"Visibility and alerts",icon:"mdi:filter-cog-outline"},{route:"yaml",label:"YAML",description:"Source editor",icon:"mdi:code-braces"},{route:"review",label:"Review & Apply",description:"Validate and publish",icon:"mdi:check-decagram-outline"}];return Qe`
+      `}_ensureSession(){const e="home_assistant_profile"===this._configSource?this._selectedProfile:"shared",t=`${this.hass.user?.id||"anonymous"}:${this._configSource}:${e}:${this._baselineRevision||""}`;if(this._session&&this._sessionIdentity===t)return;this._session?.destroy(),this._sessionIdentity=t,this._session=new ZR({userId:this.hass.user?.id||"anonymous",source:this._configSource,target:e,baselineRevision:this._baselineRevision,rawYaml:this._baselineRawYaml||this._rawYaml,config:this._sidebarConfig,activeRoute:this._workbenchRoute,onChange:e=>{this._workbenchRoute=e.activeRoute,this._mainDialog._configValid=!e.issues.some(e=>"error"===e.severity),this._mainDialog._saveDisabled=Boolean(this.saveBlockedReason),this.requestUpdate()}});const i=this._session.draftState();this._draftOffer="none"===i.state?void 0:i}_renderWorkbench(){const e=this._session,t=e.issues.filter(e=>"error"===e.severity).length,i=this._activeTargetName(),s=[{route:"sidebar",label:"Sidebar",description:"Profile and sync",icon:"mdi:account-cog-outline",group:"configure"},{route:"organize",label:"Organize",description:"Groups and items",icon:"mdi:format-list-group",group:"configure"},{route:"appearance",label:"Appearance",description:"Look and behaviour",icon:"mdi:palette-outline",group:"configure"},{route:"rules",label:"Rules",description:"Visibility and alerts",icon:"mdi:filter-cog-outline",group:"configure"},{route:"yaml",label:"YAML",description:"Source editor",icon:"mdi:code-braces",group:"advanced"},{route:"review",label:"Review & Apply",description:"Validate and publish",icon:"mdi:check-decagram-outline",group:"advanced"}];return Qe`
       <div class="workbench">
         <header class="workbench-header">
           <button class="target-control" @click=${()=>this._goToRoute("sidebar")}>
             <ha-icon icon="mdi:account-circle-outline"></ha-icon>
-            <span><small>Editing sidebar for</small><strong>${i}</strong></span>
-            <ha-icon icon="mdi:chevron-down"></ha-icon>
+            <span><small>Configuration</small><strong>${i}</strong></span>
+            <span class="change-target">Change</span>
           </button>
           <div class="header-status" aria-live="polite">
             <span class="status-chip" data-state=${e.dirty?"draft":"saved"}>
@@ -2227,16 +2272,17 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
         ${this._draftOffer?this._renderDraftRecovery(this._draftOffer):Je}
 
         <div class="workbench-body">
-          <nav class="task-rail" aria-label="Settings stages">
-            ${s.map(({route:t,label:i,description:s,icon:n},o)=>Qe`
+          <nav class="task-rail" aria-label="Settings categories">
+            <span class="rail-label">Configure</span>
+            ${s.map(({route:t,label:i,description:n,icon:o,group:r},a)=>Qe`
+                ${a>0&&s[a-1].group!==r?Qe`<span class="rail-label rail-label-spaced">Advanced</span>`:Je}
                 <button
                   class="task-link"
                   data-active=${t===this._workbenchRoute}
                   @click=${()=>this._goToRoute(t)}
                 >
-                  <span class="stage-number">${o+1}</span>
-                  <ha-icon icon=${n}></ha-icon>
-                  <span><strong>${i}</strong><small>${s}</small></span>
+                  <ha-icon icon=${o}></ha-icon>
+                  <span><strong>${i}</strong><small>${n}</small></span>
                   ${e.issues.some(e=>e.route===t&&"error"===e.severity)?Qe`<ha-icon class="stage-error" icon="mdi:alert-circle"></ha-icon>`:Je}
                 </button>
               `)}
@@ -2259,7 +2305,10 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
             ${this._renderWorkbenchRoute()}
           </main>
 
-          <aside class="desktop-preview" aria-label="Live sidebar preview">${this._renderSidebarPreview()}</aside>
+          <aside class="desktop-preview" aria-label="Live sidebar preview">
+            <div class="preview-heading"><span>Live preview</span><small>Updates as you edit</small></div>
+            ${this._renderSidebarPreview()}
+          </aside>
         </div>
 
         <footer class="workbench-actions">
@@ -2555,6 +2604,12 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
           color: var(--secondary-text-color);
           font-size: 0.78rem;
         }
+        .change-target {
+          color: var(--primary-color);
+          font-size: .82rem;
+          font-weight: 600;
+          margin-inline-start: 4px;
+        }
         .header-status {
           display: flex;
           flex: 1;
@@ -2572,77 +2627,83 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
         .status-chip[data-state='draft'] { color: var(--warning-color, #f9a825); }
         .status-chip[data-state='error'] { color: var(--error-color); }
         .status-chip[data-state='valid'] { color: var(--success-color, #43a047); }
-        .preview-toggle { display: none; min-height: 44px; }
+        .preview-toggle { display: inline-flex; min-height: 44px; }
         .workbench-body {
           display: grid;
-          grid-template-columns: 220px minmax(0, 1fr) minmax(300px, 360px);
+          grid-template-columns: 232px minmax(0, 1fr);
           min-height: 0;
           overflow: hidden;
         }
         .task-rail {
+          background: color-mix(in srgb, var(--secondary-background-color) 46%, transparent);
           border-inline-end: 1px solid var(--divider-color);
           display: flex;
           flex-direction: column;
           gap: 4px;
           overflow-y: auto;
-          padding: 12px 8px;
+          padding: 18px 12px;
         }
+        .rail-label {
+          color: var(--secondary-text-color);
+          font-size: .72rem;
+          font-weight: 700;
+          letter-spacing: .08em;
+          padding: 0 10px 4px;
+          text-transform: uppercase;
+        }
+        .rail-label-spaced { margin-top: 14px; }
         .task-link {
           align-items: center;
           border-radius: 10px;
           display: grid;
           gap: 8px;
-          grid-template-columns: 24px 24px minmax(0, 1fr) auto;
-          min-height: 56px;
-          padding: 7px 8px;
+          grid-template-columns: 28px minmax(0, 1fr) auto;
+          min-height: 54px;
+          padding: 7px 10px;
           text-align: start;
           width: 100%;
         }
         .task-link[data-active='true'] {
           background: color-mix(in srgb, var(--primary-color) 14%, transparent);
           color: var(--primary-color);
-        }
-        .stage-number {
-          align-items: center;
-          background: var(--secondary-background-color);
-          border-radius: 50%;
-          display: flex !important;
-          font-size: 0.75rem;
-          height: 24px;
-          justify-content: center;
-          width: 24px;
+          box-shadow: inset 3px 0 var(--primary-color);
         }
         .stage-error { color: var(--error-color); }
         .editor-canvas {
           min-width: 0;
           overflow: auto;
-          padding: 20px clamp(14px, 2vw, 28px) 32px;
+          padding: 28px clamp(20px, 4vw, 64px) 48px;
         }
         .desktop-preview {
           background: var(--primary-background-color);
           border-inline-start: 1px solid var(--divider-color);
           min-width: 0;
           overflow: auto;
-          padding: 14px;
+          display: none;
+          padding: 20px;
         }
+        .preview-heading { display: grid; gap: 2px; margin: 0 auto 14px; max-width: 340px; }
+        .preview-heading span { font-weight: 600; }
+        .preview-heading small { color: var(--secondary-text-color); }
         .desktop-preview #sidebar-preview {
           margin-inline: auto;
           max-width: 340px;
           position: sticky;
           top: 0;
         }
-        .stage { display: grid; gap: 18px; }
+        .stage { display: grid; gap: 24px; margin: 0 auto; max-width: 920px; }
         .stage-heading h1 { font-size: 1.55rem; margin: 0; }
         .stage-heading p { color: var(--secondary-text-color); line-height: 1.45; margin: 5px 0 0; }
         .workbench-card {
-          background: var(--card-background-color, var(--mdc-theme-surface));
-          border: 1px solid var(--divider-color);
-          border-radius: 12px;
+          background: transparent;
+          border: 0;
+          border-block-start: 1px solid var(--divider-color);
+          border-radius: 0;
           box-sizing: border-box;
           display: grid;
           gap: 14px;
           min-width: 0;
-          padding: 16px;
+          padding: 22px 0 0;
         }
         .workbench-card h2, .workbench-card p { margin: 0; }
         .card-heading { display: flex; justify-content: space-between; }
@@ -2707,10 +2768,13 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
           pointer-events: none;
         }
 
-        @media (max-width: 1199px) {
-          .preview-toggle { display: inline-flex; }
-          .workbench-body { grid-template-columns: 210px minmax(0, 1fr); }
-          .desktop-preview { display: none; }
+        @media (min-width: 1500px) {
+          .workbench-body { grid-template-columns: 232px minmax(0, 1fr) minmax(320px, 380px); }
+          .desktop-preview { display: block; }
+          .preview-toggle { display: none; }
+        }
+
+        @media (max-width: 1499px) {
           .preview-scrim {
             background: rgba(0, 0, 0, .45);
             display: block;
@@ -2741,6 +2805,10 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
           .preview-drawer[open] { transform: translateX(0); }
           .drawer-header { align-items: center; display: flex; justify-content: space-between; min-height: 52px; }
           .preview-drawer #sidebar-preview { margin: auto; max-width: 340px; }
+        }
+
+        @media (max-width: 1199px) {
+          .workbench-body { grid-template-columns: 220px minmax(0, 1fr); }
         }
 
         @media (max-width: 767px) {
@@ -2958,16 +3026,14 @@ var Lg,Ng,$g,Bg,Hg,Gg={},Ug=[],jg=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine
         }
         .settings-overview {
           display: grid;
-          gap: 12px;
-          padding: 4px;
+          gap: 20px;
         }
         .settings-card {
-          background: var(--card-background-color, var(--mdc-theme-surface));
-          border: 1px solid var(--divider-color);
-          border-radius: 12px;
+          background: transparent;
+          border: 0;
           display: grid;
           gap: 14px;
-          padding: 16px;
+          padding: 0;
         }
         .settings-card-heading {
           align-items: flex-start;
