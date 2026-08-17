@@ -1,3 +1,9 @@
+## [4.6.3](https://github.com/aero-oli/sidebar-organizer/compare/v4.6.2...v4.6.3) (2026-08-17)
+
+### Bug Fixes
+
+* accept custom sidebar link identities ([86a2d8e](https://github.com/aero-oli/sidebar-organizer/commit/86a2d8e46ecac1c9226d23e5a089f66905694ae7))
+
 ## [4.6.2](https://github.com/aero-oli/sidebar-organizer/compare/v4.6.1...v4.6.2) (2026-08-17)
 
 ### Bug Fixes
