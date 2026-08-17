@@ -4,6 +4,8 @@ import { getPromisableResult } from 'get-promisable-result';
 import { html, TemplateResult } from 'lit';
 import { ifDefined } from 'lit/directives/if-defined.js';
 
+import { isPanelIdentityValid } from './panel-identity';
+
 const HOLD_DURATION = 300;
 const NAME_RGX = /sidebar-organizer.js/i;
 const HACS_TAG_RGX = /[?&]hacstag=(\d+)/;
@@ -286,10 +288,11 @@ export const nextRender = () =>
   });
 
 export const compareDatasetWithHref = (element: SidebarPanelItem): boolean => {
-  const panelId = element.dataset.panel;
-  const hrefPanelId = element.href?.replace('/', '');
-  const isValid = hrefPanelId === '#' || panelId === hrefPanelId;
-  return isValid;
+  return isPanelIdentityValid(
+    element.dataset.panel,
+    element.href,
+    element.hasAttribute(ATTRIBUTE.NEW_ITEM)
+  );
 };
 
 export const parseItemValues = (

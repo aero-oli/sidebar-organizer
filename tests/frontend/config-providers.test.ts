@@ -26,6 +26,7 @@ import { SerialTaskQueue } from '../../src/runtime/serial-task-queue';
 import { SubscriptionGuard } from '../../src/runtime/subscription-guard';
 import { areGroupsCollapsed, resolveCollapsedGroups, setGroupsCollapsed } from '../../src/config/preferences';
 import { haveSamePanelPaths } from '../../src/utilities/dashboard';
+import { isPanelIdentityValid } from '../../src/utilities/panel-identity';
 
 describe('parseSidebarYamlConfig', () => {
   it('parses and normalizes valid sidebar YAML', () => {
@@ -119,6 +120,17 @@ describe('haveSamePanelPaths', () => {
     const current = [{ url_path: 'history' }];
 
     assert.equal(haveSamePanelPaths(previous, current), false);
+  });
+});
+
+describe('isPanelIdentityValid', () => {
+  it('accepts native panels whose data-panel matches the href', () => {
+    assert.equal(isPanelIdentityValid('energy', '/energy', false), true);
+    assert.equal(isPanelIdentityValid('energy', '/history', false), false);
+  });
+
+  it('accepts custom links whose title-based identity differs from the href', () => {
+    assert.equal(isPanelIdentityValid('Apps', '/dashboard-apps', true), true);
   });
 });
 
