@@ -1,3 +1,9 @@
+## [4.7.0](https://github.com/aero-oli/sidebar-organizer/compare/v4.6.3...v4.7.0) (2026-08-17)
+
+### Features
+
+* redesign settings workspace ([458aace](https://github.com/aero-oli/sidebar-organizer/commit/458aace1fc760728b4361354d72d1c4fdc32df00))
+
 ## [4.6.3](https://github.com/aero-oli/sidebar-organizer/compare/v4.6.2...v4.6.3) (2026-08-17)
 
 ### Bug Fixes

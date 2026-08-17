@@ -1,6 +1,6 @@
 {
   "name": "sidebar-organizer",
-  "version": "4.6.3",
+  "version": "4.7.0",
   "module": "dist/sidebar-organizer.js",
   "author": "Viet Ngoc",
   "license": "MIT",
