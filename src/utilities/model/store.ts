@@ -2,13 +2,11 @@ import type { Panels } from '@types';
 
 import { ELEMENT, NAMESPACE, STORAGE } from '@constants';
 import { HaExtened } from '@types';
-import { DashboardPanels, DataTableItem } from '@utilities/dashboard';
+import { DashboardPanels, DataTableItem, haveSamePanelPaths } from '@utilities/dashboard';
 import { nextRender } from '@utilities/dom-utils';
 import { UTILITIES } from '@utilities/index';
-import { shallowEqual } from '@utilities/shallow-equal';
 import { getStorageStringArray, setStorage } from '@utilities/storage-utils';
 import { showToast } from '@utilities/toast-notify';
-import { isEmpty } from 'es-toolkit/compat';
 
 import { SidebarOrganizer } from '../../sidebar-organizer';
 import { HomeAssistant } from '../../types/ha';
@@ -71,13 +69,13 @@ export default class Store {
       if (
         added.length > 0 ||
         removed.length > 0 ||
-        !shallowEqual(notShowInSidebar, initDasboardPanels.notShowInSidebar || [])
+        !haveSamePanelPaths(notShowInSidebar, initDasboardPanels.notShowInSidebar || [])
       ) {
         this._dashboardPanels = {
           ...initDasboardPanels,
-          ...(!isEmpty(added) && { added: added.map((item) => panels[item.url_path]!) }),
-          ...(!isEmpty(removed) && { removed: removed }),
-          ...(!isEmpty(notShowInSidebar) && { notShowInSidebar }),
+          added: added.map((item) => panels[item.url_path]!),
+          removed,
+          notShowInSidebar,
         };
         console.debug(
           '%cSTORE:',

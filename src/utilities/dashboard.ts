@@ -54,6 +54,17 @@ export interface DashboardPanels {
   notShowInSidebar?: PanelInfo[];
   removed?: string[];
 }
+
+export const haveSamePanelPaths = (
+  left: Array<Pick<PanelInfo, 'url_path'>>,
+  right: Array<Pick<PanelInfo, 'url_path'>>
+): boolean => {
+  if (left.length !== right.length) return false;
+
+  const leftPaths = new Set(left.map((panel) => panel.url_path));
+  return right.every((panel) => leftPaths.has(panel.url_path));
+};
+
 export const fetchDashboards = (hass: HomeAssistant): Promise<LovelaceDashboard[]> =>
   hass.callWS({
     type: 'lovelace/dashboards/list',

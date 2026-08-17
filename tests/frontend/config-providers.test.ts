@@ -25,6 +25,7 @@ import { RuntimeLifecycle } from '../../src/runtime/lifecycle';
 import { SerialTaskQueue } from '../../src/runtime/serial-task-queue';
 import { SubscriptionGuard } from '../../src/runtime/subscription-guard';
 import { areGroupsCollapsed, resolveCollapsedGroups, setGroupsCollapsed } from '../../src/config/preferences';
+import { haveSamePanelPaths } from '../../src/utilities/dashboard';
 
 describe('parseSidebarYamlConfig', () => {
   it('parses and normalizes valid sidebar YAML', () => {
@@ -102,6 +103,22 @@ describe('RuntimeLifecycle', () => {
     assert.equal(lifecycle.state, 'discovering');
     assert.equal(lifecycle.transition(second, 'ready'), true);
     assert.equal(lifecycle.state, 'ready');
+  });
+});
+
+describe('haveSamePanelPaths', () => {
+  it('treats fresh panel objects for the same hidden dashboards as unchanged', () => {
+    const previous = [{ url_path: 'energy', title: 'Energy' }, { url_path: 'history', title: 'History' }];
+    const current = [{ url_path: 'history', title: 'History (translated)' }, { url_path: 'energy', title: 'Energy' }];
+
+    assert.equal(haveSamePanelPaths(previous, current), true);
+  });
+
+  it('detects a real change in hidden dashboard membership', () => {
+    const previous = [{ url_path: 'energy' }];
+    const current = [{ url_path: 'history' }];
+
+    assert.equal(haveSamePanelPaths(previous, current), false);
   });
 });
 
