@@ -1,7 +1,8 @@
 import type { ConfigSource } from '../../../config';
 import type { SidebarConfig } from '../../../types';
 
-export const WORKBENCH_ROUTES = ['sidebar', 'organize', 'appearance', 'rules', 'yaml', 'review'] as const;
+export const WORKBENCH_NAV_ROUTES = ['sidebar', 'items', 'organize', 'appearance', 'yaml'] as const;
+export const WORKBENCH_ROUTES = [...WORKBENCH_NAV_ROUTES, 'review'] as const;
 export type WorkbenchRoute = (typeof WORKBENCH_ROUTES)[number];
 
 export type ValidationSeverity = 'error' | 'warning' | 'info';

@@ -5,14 +5,14 @@ import { validateSidebarConfigShape } from '../../../config/validation';
 
 const ROUTES: Record<string, WorkbenchRoute> = {
   color_config: 'appearance',
-  notification: 'rules',
-  visibility_templates: 'rules',
-  new_items: 'organize',
+  notification: 'items',
+  visibility_templates: 'items',
+  new_items: 'items',
   custom_groups: 'organize',
   bottom_groups: 'organize',
   bottom_items: 'organize',
   bottom_grid_items: 'organize',
-  hidden_items: 'rules',
+  hidden_items: 'items',
 };
 
 export const validateStructuredConfig = (config: SidebarConfig): ValidationIssue[] => {

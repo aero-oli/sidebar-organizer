@@ -39,7 +39,7 @@ export class SidebarDialogPanels extends BaseEditor {
     super(CONFIG_SECTION.PANELS);
   }
   @property({ attribute: false }) _sidebarConfig!: SidebarConfig;
-  @property({ type: String, attribute: 'workbench-mode', reflect: true }) workbenchMode?: 'organize' | 'rules';
+  @property({ type: String, attribute: 'workbench-mode', reflect: true }) workbenchMode?: 'layout' | 'items';
 
   @state() private _selectedTab: PANEL_AREA = PANEL_AREA.ALL_ITEMS;
   @state() public _selectedBottom: BOTTOM_SECTION = BOTTOM_SECTION.BOTTOM_ITEMS;
@@ -52,7 +52,9 @@ export class SidebarDialogPanels extends BaseEditor {
 
   protected willUpdate(_changedProperties: PropertyValues): void {
     if (_changedProperties.has('workbenchMode')) {
-      this._selectedTab = this.workbenchMode === 'rules' ? PANEL_AREA.VISIBILITY : PANEL_AREA.ALL_ITEMS;
+      this._selectedTab = this.workbenchMode === 'items' ? PANEL_AREA.VISIBILITY : PANEL_AREA.CUSTOM_GROUPS;
+      this._selectedGroup = null;
+      this._selectedBottomGroup = null;
     }
     if (_changedProperties.has('_selectedTab')) {
       const prevTab = _changedProperties.get('_selectedTab') as PANEL_AREA | undefined;
@@ -103,7 +105,7 @@ export class SidebarDialogPanels extends BaseEditor {
   }
 
   protected render() {
-    if (this.workbenchMode === 'rules') {
+    if (this.workbenchMode === 'items') {
       return html`
         <div class="rules-layout">
           <so-panel-visibility
@@ -121,6 +123,10 @@ export class SidebarDialogPanels extends BaseEditor {
           </section>
         </div>
       `;
+    }
+
+    if (this.workbenchMode === 'layout') {
+      return this._renderLayoutWorkbench();
     }
 
     const options = PanelAreaTabs;
@@ -141,8 +147,49 @@ export class SidebarDialogPanels extends BaseEditor {
       [PANEL_AREA.NOTIFICATIONS]: this._renderNotificationConfig(),
     };
     return html`
-      ${this.workbenchMode === 'organize' ? nothing : html`<div class="groups-menu-header">${tabSelector}</div>`}
+      ${this.workbenchMode ? nothing : html`<div class="groups-menu-header">${tabSelector}</div>`}
       <div class="config-content">${panelContent[this._selectedTab]}</div>
+    `;
+  }
+
+  private _renderLayoutWorkbench(): TemplateResult {
+    if (this._selectedGroup !== null) {
+      return html`
+        <section class="layout-section">
+          <div class="layout-heading">
+            <div><h2>${this._selectedGroup}</h2><p>Choose the items in this group and drag them into order.</p></div>
+          </div>
+          ${this._renderEditGroup()}
+        </section>
+      `;
+    }
+
+    return html`
+      <div class="layout-workbench">
+        <section class="layout-section">
+          <div class="layout-heading">
+            <div><h2>Sidebar groups</h2><p>Create groups, change their order, then open a group to assign its items.</p></div>
+          </div>
+          ${this._renderCustomGroupList()}
+        </section>
+        <section class="layout-section">
+          <div class="layout-heading">
+            <div><h2>Bottom area</h2><p>Place items or compact groups at the bottom of the sidebar.</p></div>
+          </div>
+          <details class="layout-detail">
+            <summary><span><strong>Bottom items</strong><small>Standard rows shown below the main groups.</small></span></summary>
+            ${this._renderPanelSelector(BOTTOM_SECTION.BOTTOM_ITEMS)}
+          </details>
+          <details class="layout-detail">
+            <summary><span><strong>Bottom grid</strong><small>Compact icon items shown in a grid.</small></span></summary>
+            ${this._renderPanelSelector(BOTTOM_SECTION.BOTTOM_GRID_ITEMS)}
+          </details>
+          <details class="layout-detail">
+            <summary><span><strong>Bottom groups</strong><small>Expandable groups kept in the bottom area.</small></span></summary>
+            ${this._renderBottomGroupsList()}
+          </details>
+        </section>
+      </div>
     `;
   }
 
@@ -503,7 +550,7 @@ export class SidebarDialogPanels extends BaseEditor {
   private _handleNavigateSection = (ev: CustomEvent) => {
     ev.stopPropagation();
     console.log('Navigate to the integrated custom item editor.');
-    this._dialog.navigateWorkbench('organize');
+    this._dialog.navigateWorkbench('items');
   };
 
   private _handleGroupActionEvent = async (event: CustomEvent): Promise<void> => {
@@ -787,10 +834,7 @@ export class SidebarDialogPanels extends BaseEditor {
     const uncategorizedActive = this._dialog._uncategorizedIsActive === true;
     const isUncategorizedGroup = customGroup === PANEL_TYPE.UNCATEGORIZED_ITEMS;
     const defaultPanel = getDefaultPanelUrlPath(this.hass);
-    const hiddenItems = this._sidebarConfig?.hidden_items || [];
-    const currentItems = this._dialog._initCombiPanels.filter(
-      (item) => !hiddenItems.includes(item) && item !== defaultPanel
-    );
+    const currentItems = this._dialog._initCombiPanels.filter((item) => item !== defaultPanel);
     const pickedItems = uncategorizedActive
       ? this._dialog.pickedWithoutUncategorizedFromCustom
       : this._dialog.pickedItems;
@@ -811,7 +855,7 @@ export class SidebarDialogPanels extends BaseEditor {
     // console.log('itemsToChoose', itemsToChoose);
     const selector = this._createSelectorOptions(itemsToChoose);
 
-    const renderItems = this._renderSelectedItems(selectedType, selectedItems);
+    const renderItems = this._renderSelectedItems(configValue, customGroup, selectedType, selectedItems);
     const renderPinGroupForms = customGroup ? this._renderPinGroupForms(customGroup) : nothing;
 
     return html`
@@ -889,7 +933,12 @@ export class SidebarDialogPanels extends BaseEditor {
       ></ha-form>
     `;
   }
-  private _renderSelectedItems(selectedType: string, selectedItems: string[]): TemplateResult {
+  private _renderSelectedItems(
+    configValue: string,
+    customGroup: string | undefined,
+    selectedType: string,
+    selectedItems: string[]
+  ): TemplateResult {
     const hassPanels = this.hass?.panels;
     const icon = (item: string) => {
       return this._dialog._newItemMap.get(item)?.icon || hassPanels[item]?.icon || '';
@@ -926,7 +975,12 @@ export class SidebarDialogPanels extends BaseEditor {
 
       ${this._reloadPanelItems
         ? html`<ha-spinner .size=${'small'}></ha-spinner> `
-        : html` <ha-sortable handle-selector=".handle" @item-moved=${this._itemMoved}>
+        : html` <ha-sortable
+            handle-selector=".handle"
+            .configValue=${configValue}
+            .customGroup=${customGroup}
+            @item-moved=${this._itemMoved}
+          >
             <div
               class="selected-items-preview"
               id="selected-items"
@@ -948,6 +1002,8 @@ export class SidebarDialogPanels extends BaseEditor {
     ev.stopPropagation();
     if (!this._sidebarConfig) return;
     const { oldIndex, newIndex } = ev.detail;
+    const configValue = (ev.currentTarget as HTMLElement & { configValue?: string }).configValue;
+    const customGroup = (ev.currentTarget as HTMLElement & { customGroup?: string }).customGroup;
     const updateConfig = (updates: Partial<SidebarConfig>) => {
       this._sidebarConfig = {
         ...this._sidebarConfig,
@@ -956,30 +1012,28 @@ export class SidebarDialogPanels extends BaseEditor {
       this._dispatchConfig(this._sidebarConfig);
     };
 
-    switch (this._selectedTab) {
-      case PANEL_AREA.BOTTOM_PANELS: {
-        const bottomSection = this._selectedBottom;
-        if (bottomSection === BOTTOM_SECTION.BOTTOM_GROUPS) {
-          const groupName = this._selectedBottomGroup;
-          if (!groupName) break;
+    switch (configValue) {
+      case BOTTOM_SECTION.BOTTOM_GROUPS: {
+          const groupName = customGroup;
+          if (!groupName) return;
           const bottomGroups = { ...(this._sidebarConfig.bottom_groups || {}) };
           const items = [...(bottomGroups[groupName] || [])];
           items.splice(newIndex, 0, items.splice(oldIndex, 1)[0]);
           bottomGroups[groupName] = items;
           updateConfig({ bottom_groups: bottomGroups });
-        } else {
-          const items = [
-            ...(this._sidebarConfig[bottomSection as BOTTOM_SECTION.BOTTOM_ITEMS | BOTTOM_SECTION.BOTTOM_GRID_ITEMS] ||
-              []),
-          ];
+          break;
+      }
+      case BOTTOM_SECTION.BOTTOM_ITEMS:
+      case BOTTOM_SECTION.BOTTOM_GRID_ITEMS: {
+          const bottomSection = configValue as BOTTOM_SECTION.BOTTOM_ITEMS | BOTTOM_SECTION.BOTTOM_GRID_ITEMS;
+          const items = [...(this._sidebarConfig[bottomSection] || [])];
           items.splice(newIndex, 0, items.splice(oldIndex, 1)[0]);
           updateConfig({ [bottomSection]: items });
-        }
         break;
       }
-      case PANEL_AREA.CUSTOM_GROUPS:
+      case PANEL_AREA.CUSTOM_GROUPS: {
         const customGroups = { ...(this._sidebarConfig.custom_groups || {}) };
-        const groupName = this._selectedGroup;
+        const groupName = customGroup;
         if (groupName) {
           const groupItems = [...(customGroups[groupName] || [])].concat();
           console.log(groupName, groupItems);
@@ -989,6 +1043,7 @@ export class SidebarDialogPanels extends BaseEditor {
           updateConfig({ custom_groups: customGroups });
         }
         break;
+      }
     }
   };
 
@@ -1238,6 +1293,53 @@ export class SidebarDialogPanels extends BaseEditor {
         .rules-layout {
           display: grid;
           gap: 28px;
+        }
+        .layout-workbench,
+        .layout-section {
+          display: grid;
+          gap: 18px;
+        }
+        .layout-workbench {
+          gap: 28px;
+        }
+        .layout-section + .layout-section {
+          border-block-start: 1px solid var(--divider-color);
+          padding-block-start: 22px;
+        }
+        .layout-heading h2,
+        .layout-heading p {
+          margin: 0;
+        }
+        .layout-heading h2 {
+          font-size: 1.05rem;
+        }
+        .layout-heading p {
+          color: var(--secondary-text-color);
+          font-size: .9rem;
+          line-height: 1.4;
+          margin-top: 4px;
+        }
+        .layout-detail {
+          border-block-start: 1px solid var(--divider-color);
+          padding-block-start: 8px;
+        }
+        .layout-detail summary {
+          align-items: center;
+          cursor: pointer;
+          display: flex;
+          min-height: 52px;
+        }
+        .layout-detail summary span {
+          display: grid;
+          gap: 3px;
+        }
+        .layout-detail summary small {
+          color: var(--secondary-text-color);
+          font-size: .82rem;
+          font-weight: 400;
+        }
+        .layout-detail[open] summary {
+          margin-block-end: 12px;
         }
         .rule-section {
           border-block-start: 1px solid var(--divider-color);

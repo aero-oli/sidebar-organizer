@@ -5,7 +5,7 @@ import { safeCustomElement } from '@utilities/safe-custom-element';
 import { showConfirmDialog, showPromptDialog } from '@utilities/show-dialog-box';
 import { BaseEditor } from 'components/base-editor';
 import { BOTTOM_SECTION, CONFIG_SECTION } from 'constants/config-area';
-import { capitalize, findKey, pick } from 'es-toolkit/compat';
+import { capitalize, pick } from 'es-toolkit/compat';
 import { html, TemplateResult, nothing, PropertyValues, CSSResultGroup, css } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
@@ -47,16 +47,6 @@ export class SidebarDialogNewItems extends BaseEditor {
     }
   }
 
-  private get groupKeys(): { value: string; label?: string }[] {
-    const bottomPanelOption = { value: 'bottom_items', label: 'BOTTOM' };
-    const customGroups = this._sidebarConfig?.custom_groups || {};
-    const groupOptions = Object.keys(customGroups).map((group) => ({
-      value: group,
-      label: group.replace(/_/g, ' ').toUpperCase(),
-    }));
-    return [bottomPanelOption, ...groupOptions];
-  }
-
   private _actionsSchema = [
     {
       title: 'Interaction',
@@ -91,31 +81,38 @@ export class SidebarDialogNewItems extends BaseEditor {
     },
   ] as const;
 
-  private _configSchema = memoizeOne(
-    (groupsOptions: { value: string; label?: string }[]) =>
-      [
-        {
-          type: 'grid',
-          schema: [
-            {
-              name: 'icon',
-              label: 'Item Icon',
-              selector: { icon: {} },
-            },
-            {
-              name: 'group',
-              label: 'Item Group',
-              required: false,
-              selector: {
-                select: {
-                  mode: 'dropdown',
-                  options: groupsOptions.length ? groupsOptions : [{ value: '', label: 'Ungrouped' }],
-                },
+  private _configSchema = memoizeOne(() =>
+    [
+      {
+        type: 'grid',
+        schema: [
+          {
+            name: 'icon',
+            label: 'Item Icon',
+            selector: { icon: {} },
+          },
+          {
+            name: 'url_path',
+            label: 'Destination',
+            helper: 'Home Assistant path or full URL. Leave blank for an action-only item.',
+            type: 'string',
+          },
+          {
+            name: 'target',
+            label: 'Open in',
+            selector: {
+              select: {
+                mode: 'dropdown',
+                options: [
+                  { value: '_self', label: 'This window' },
+                  { value: '_blank', label: 'New window' },
+                ],
               },
             },
-          ],
-        },
-      ] as const
+          },
+        ],
+      },
+    ] as const
   );
 
   protected render(): TemplateResult | typeof nothing {
@@ -189,7 +186,8 @@ export class SidebarDialogNewItems extends BaseEditor {
     // console.log('Item is in group:', inGroup);
     const dataWithoutActions = {
       icon: baseData?.icon,
-      group: groupKey,
+      url_path: baseData?.url_path,
+      target: baseData?.target || '_self',
     };
 
     const actionData = pick(baseData, ['entity', 'tap_action', 'hold_action', 'double_tap_action']);
@@ -197,8 +195,7 @@ export class SidebarDialogNewItems extends BaseEditor {
     const iconTemplateData = {
       icon_template: baseData.icon_template,
     };
-    const groupKeys = this.groupKeys;
-    const baseSchema = this._configSchema(groupKeys);
+    const baseSchema = this._configSchema();
     const actionSchema = this._actionsSchema;
     const iconTemplateSchema = this._iconTemplateSchema;
 
@@ -259,13 +256,7 @@ export class SidebarDialogNewItems extends BaseEditor {
   }
 
   private getGroupKey(item: string): string | undefined {
-    const { custom_groups = {}, bottom_items = [], bottom_grid_items = [] } = this._sidebarConfig;
-    const groups = {
-      ...custom_groups,
-      bottom_items,
-      bottom_grid_items,
-    };
-    return findKey(groups, (g) => g.includes(item));
+    return this._dialog._getGroupOfPanel(item) || undefined;
   }
 
   private _toggleItemInPreview(itemTitle: string): void {
@@ -321,12 +312,9 @@ export class SidebarDialogNewItems extends BaseEditor {
 
     let updates: Partial<NewItemConfig> = {};
     if (configKey === 'base') {
-      const group = incoming?.group;
-      const title = currentItem.title!;
       updates = {
         ...incoming,
       };
-      this._handleGroupChange(title, group);
     } else if (configKey === 'actions') {
       const currentActions = pick(currentItem, ['entity', 'tap_action', 'hold_action', 'double_tap_action']);
       if (JSON.stringify(currentActions) !== JSON.stringify(incoming)) {
@@ -360,50 +348,6 @@ export class SidebarDialogNewItems extends BaseEditor {
     }
   }
 
-  private _handleGroupChange(title: string, group: string | undefined): void {
-    const inGroup = this.getGroupKey(title);
-    // If item is already in the group, we do nothing
-    console.log('Handling group change:', title, 'from', inGroup, 'to', group);
-    if (
-      inGroup === group ||
-      (inGroup === '' && !group) ||
-      (!inGroup && !group) ||
-      (inGroup === 'bottom_items' && group === 'bottom')
-    ) {
-      console.log(`Item "${title}" is already in group "${inGroup}" or ungrouped.`);
-      return;
-    }
-    console.log(`Item "${title}" is in group "${inGroup}", move to "${group}"`);
-    if (!group || group === '') {
-      this._handleRemoveItem(title);
-    } else if (inGroup !== group) {
-      this._handleRemoveItem(title);
-      // If group is 'bottom', we handle it separately
-      if (group === 'bottom') {
-        const bottomItems = [...(this._sidebarConfig.bottom_items || [])];
-        if (!bottomItems.includes(title)) {
-          bottomItems.push(title);
-          this._sidebarConfig = {
-            ...this._sidebarConfig,
-            bottom_items: bottomItems,
-          };
-        }
-        return;
-      }
-      // Add to new group
-      const customGroups = { ...this._sidebarConfig.custom_groups };
-      if (!customGroups[group]) {
-        customGroups[group] = [];
-      }
-      customGroups[group].push(title);
-      this._sidebarConfig = {
-        ...this._sidebarConfig,
-        custom_groups: customGroups,
-      };
-      return;
-    }
-  }
-
   private _handleDeleteItem = async (index: number) => {
     const title = this._sidebarConfig.new_items![index].title;
     const confirmDelete = await showConfirmDialog(
@@ -427,36 +371,34 @@ export class SidebarDialogNewItems extends BaseEditor {
   };
 
   private _handleRemoveItem = (title: string) => {
-    const inGroups = this.getGroupKey(title);
-    if (inGroups) {
-      console.log(`Removing item "${title}" from group "${inGroups}"`);
-      // If item is in group, we need to remove it from the group
-      const removeFromGroup = (group: string[]): void => {
-        const index = group.indexOf(title);
-        if (index !== -1) {
-          group.splice(index, 1);
-        }
-      };
-      const currentConfig = { ...this._sidebarConfig };
-      const updatedConfig: SidebarConfig = { ...currentConfig };
-      switch (inGroups) {
-        case 'bottom_items':
-          const bottomItems = [...(currentConfig.bottom_items || [])];
-          removeFromGroup(bottomItems);
-          updatedConfig.bottom_items = bottomItems;
-          break;
-        default:
-          const customGroups = { ...currentConfig.custom_groups };
-          const groupItems = customGroups[inGroups] || [];
-          removeFromGroup(groupItems);
-          customGroups[inGroups] = groupItems;
-          updatedConfig.custom_groups = customGroups;
-          break;
-      }
-      this._sidebarConfig = updatedConfig;
-      console.log('Updated config after removal:', this._sidebarConfig);
-    }
+    this._updateItemAssignments(title);
   };
+
+  private _updateItemAssignments(title: string, replacement?: string): void {
+    const replace = (items: string[]) =>
+      items.flatMap((item) => (item === title ? (replacement ? [replacement] : []) : [item]));
+    this._sidebarConfig = {
+      ...this._sidebarConfig,
+      ...(this._sidebarConfig.custom_groups
+        ? {
+            custom_groups: Object.fromEntries(
+              Object.entries(this._sidebarConfig.custom_groups).map(([group, items]) => [group, replace(items)])
+            ),
+          }
+        : {}),
+      ...(this._sidebarConfig.bottom_groups
+        ? {
+            bottom_groups: Object.fromEntries(
+              Object.entries(this._sidebarConfig.bottom_groups).map(([group, items]) => [group, replace(items)])
+            ),
+          }
+        : {}),
+      ...(this._sidebarConfig.bottom_items ? { bottom_items: replace(this._sidebarConfig.bottom_items) } : {}),
+      ...(this._sidebarConfig.bottom_grid_items
+        ? { bottom_grid_items: replace(this._sidebarConfig.bottom_grid_items) }
+        : {}),
+    };
+  }
 
   private _toggleRenameItem = async (index: number) => {
     const currentTitle = this._sidebarConfig.new_items![index].title!;
@@ -469,35 +411,7 @@ export class SidebarDialogNewItems extends BaseEditor {
       return;
     }
 
-    const inGroups = this.getGroupKey(currentTitle);
-
-    if (inGroups) {
-      console.log(`Renaming item "${currentTitle}" to "${newItemTitle}" in group "${inGroups}"`);
-      // If item is in group, we need to update that item in the group
-      const updatedConfig: SidebarConfig = { ...this._sidebarConfig };
-      switch (inGroups) {
-        case 'bottom_items':
-          const bottomItems = [...(this._sidebarConfig.bottom_items || [])];
-          const bottomIndex = bottomItems.indexOf(currentTitle);
-          if (bottomIndex !== -1) {
-            bottomItems[bottomIndex] = newItemTitle;
-          }
-          updatedConfig.bottom_items = bottomItems;
-          break;
-        default:
-          const customGroups = { ...this._sidebarConfig.custom_groups };
-          const groupItems = customGroups[inGroups] || [];
-          const groupIndex = groupItems.indexOf(currentTitle);
-          if (groupIndex !== -1) {
-            groupItems[groupIndex] = newItemTitle;
-          }
-          customGroups[inGroups] = groupItems;
-          updatedConfig.custom_groups = customGroups;
-          break;
-      }
-      this._sidebarConfig = updatedConfig;
-      console.log('Updated config after renaming:', this._sidebarConfig);
-    }
+    this._updateItemAssignments(currentTitle, newItemTitle);
     // Update the new item title
     const newItems = [...(this._sidebarConfig.new_items || [])];
     newItems[index] = {

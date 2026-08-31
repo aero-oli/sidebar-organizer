@@ -4,6 +4,8 @@ import test from 'node:test';
 import type { ConfigSource } from '../../src/config';
 import { EditorDraftStorage } from '../../src/components/editor/workbench/draft-storage';
 import { EditorSessionController } from '../../src/components/editor/workbench/editor-session-controller';
+import { WORKBENCH_NAV_ROUTES } from '../../src/components/editor/workbench/types';
+import { validateStructuredConfig } from '../../src/components/editor/workbench/validation';
 import {
   collectNotificationSettings,
   updateNotificationSetting,
@@ -92,6 +94,15 @@ test('duplicate assignments are structured, positioned, and routed to Layout', (
   assert.deepEqual(issue?.path, ['bottom_items', 0]);
   assert.equal(issue?.line, 5);
   assert.ok(issue?.column);
+});
+
+test('the visual workspace follows the five-stage settings flow', () => {
+  assert.deepEqual(WORKBENCH_NAV_ROUTES, ['sidebar', 'items', 'organize', 'appearance', 'yaml']);
+});
+
+test('item-specific validation issues open the Items stage', () => {
+  const issues = validateStructuredConfig({ new_items: [{ title: '', icon: 'mdi:link' }] });
+  assert.equal(issues[0]?.route, 'items');
 });
 
 test('notification badges have one editor while preserving their config shape', () => {

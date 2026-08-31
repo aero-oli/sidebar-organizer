@@ -63,6 +63,7 @@ import * as ELEMENT from './editor';
 import { EditorStore } from './editor-store';
 import {
   EditorSessionController,
+  WORKBENCH_NAV_ROUTES,
   type EditorDraftEnvelope,
   type ValidationIssue,
   type WorkbenchRoute,
@@ -488,20 +489,19 @@ export class SidebarConfigDialog extends BaseEditor {
     const session = this._session!;
     const issueCount = session.issues.filter((issue) => issue.severity === 'error').length;
     const targetName = this._activeTargetName();
-    const routes: Array<{
+    const routeDetails: Record<(typeof WORKBENCH_NAV_ROUTES)[number], {
       route: WorkbenchRoute;
       label: string;
       description: string;
       icon: string;
-      group: 'configure' | 'advanced';
-    }> = [
-      { route: 'sidebar', label: 'Profile', description: 'Configuration and sync', icon: 'mdi:account-cog-outline', group: 'configure' },
-      { route: 'organize', label: 'Layout', description: 'Groups, order and items', icon: 'mdi:format-list-group', group: 'configure' },
-      { route: 'appearance', label: 'Appearance', description: 'Look and behaviour', icon: 'mdi:palette-outline', group: 'configure' },
-      { route: 'rules', label: 'Visibility', description: 'Hidden items and badges', icon: 'mdi:eye-settings-outline', group: 'configure' },
-      { route: 'yaml', label: 'YAML', description: 'Source editor', icon: 'mdi:code-braces', group: 'advanced' },
-      { route: 'review', label: 'Review & Apply', description: 'Validate and publish', icon: 'mdi:check-decagram-outline', group: 'advanced' },
-    ];
+    }> = {
+      sidebar: { route: 'sidebar', label: 'Profile', description: 'Profiles and sync', icon: 'mdi:account-cog-outline' },
+      items: { route: 'items', label: 'Items', description: 'Hide, add and configure', icon: 'mdi:view-list-outline' },
+      organize: { route: 'organize', label: 'Layout', description: 'Groups and order', icon: 'mdi:format-list-group' },
+      appearance: { route: 'appearance', label: 'Appearance', description: 'Look and behaviour', icon: 'mdi:palette-outline' },
+      yaml: { route: 'yaml', label: 'YAML', description: 'Raw configuration', icon: 'mdi:code-braces' },
+    };
+    const routes = WORKBENCH_NAV_ROUTES.map((route) => routeDetails[route]);
 
     return html`
       <div class="workbench">
@@ -524,16 +524,14 @@ export class SidebarConfigDialog extends BaseEditor {
           </ha-button>
         </header>
 
-        ${this._draftOffer ? this._renderDraftRecovery(this._draftOffer) : nothing}
+        <div class="workbench-notice">
+          ${this._draftOffer ? this._renderDraftRecovery(this._draftOffer) : nothing}
+        </div>
 
         <div class="workbench-body">
           <nav class="task-rail" aria-label="Settings categories">
-            <span class="rail-label">Configure</span>
             ${routes.map(
-              ({ route, label, description, icon, group }, index) => html`
-                ${index > 0 && routes[index - 1].group !== group
-                  ? html`<span class="rail-label rail-label-spaced">Advanced</span>`
-                  : nothing}
+              ({ route, label, description, icon }) => html`
                 <button
                   class="task-link"
                   data-active=${route === this._workbenchRoute}
@@ -615,23 +613,31 @@ export class SidebarConfigDialog extends BaseEditor {
     const route = this._workbenchRoute;
     if (route === 'sidebar') return this._renderStage('Profile', 'Choose which configuration you are editing and how it is synchronized.', this._renderSettingsOverview());
     if (route === 'appearance') return this._renderStage('Appearance', 'Tune the sidebar’s title, behaviour, dimensions, theme and colours.', this._renderBaseConfig());
-    if (route === 'organize') {
+    if (route === 'items') {
       return this._renderStage(
-        'Layout',
-        'Arrange the sidebar. Visibility and notification badges are managed separately.',
+        'Items',
+        'Choose what is available in the sidebar and configure item-specific behaviour.',
         html`
-          <section class="settings-section structure-builder">
-            <div class="section-heading"><div><h2>Groups and order</h2><p>Move panels between groups and choose where they appear.</p></div></div>
-            ${this._renderPanelConfig('organize')}
+          <section class="settings-section">
+            <div class="section-heading"><div><h2>Visibility</h2><p>Hide items, add conditional rules and configure notification badges.</p></div></div>
+            ${this._renderPanelConfig('items')}
           </section>
           <section class="settings-section custom-items">
-            <div class="section-heading"><div><h2>Custom items</h2><p>Create and edit links, panels and actions.</p></div></div>
+            <div class="section-heading"><div><h2>Custom items</h2><p>Create links, panels and actions. Assign them to a group in Layout.</p></div></div>
             ${this._renderNewItemsConfig()}
           </section>
         `
       );
     }
-    if (route === 'rules') return this._renderStage('Visibility', 'Control what is shown and add optional notification badges.', this._renderPanelConfig('rules'));
+    if (route === 'organize') {
+      return this._renderStage(
+        'Layout',
+        'Create groups, assign items and set the order in which they appear.',
+        html`
+          <section class="settings-section structure-builder">${this._renderPanelConfig('layout')}</section>
+        `
+      );
+    }
     if (route === 'yaml') return this._renderYamlWorkbench();
     return this._renderReview();
   }
@@ -967,7 +973,7 @@ export class SidebarConfigDialog extends BaseEditor {
     ></sidebar-dialog-colors>`;
   }
 
-  private _renderPanelConfig(workbenchMode?: 'organize' | 'rules'): TemplateResult {
+  private _renderPanelConfig(workbenchMode?: 'layout' | 'items'): TemplateResult {
     return html` <sidebar-dialog-panels
       .hass=${this.hass}
       ._store=${this._store}
@@ -2249,19 +2255,23 @@ export class SidebarConfigDialog extends BaseEditor {
         .status-chip[data-state='valid'] { color: var(--success-color, #43a047); }
         .preview-toggle { display: inline-flex; min-height: 44px; }
         .workbench-body {
+          align-items: start;
           display: grid;
           grid-template-columns: 232px minmax(0, 1fr);
           min-height: 0;
-          overflow: hidden;
+          overflow: auto;
+          overscroll-behavior: contain;
         }
         .task-rail {
+          align-self: start;
           background: color-mix(in srgb, var(--secondary-background-color) 46%, transparent);
           border-inline-end: 1px solid var(--divider-color);
           display: flex;
           flex-direction: column;
           gap: 4px;
-          overflow-y: auto;
           padding: 18px 12px;
+          position: sticky;
+          top: 0;
         }
         .rail-label {
           color: var(--secondary-text-color);
@@ -2291,8 +2301,8 @@ export class SidebarConfigDialog extends BaseEditor {
         .stage-error { color: var(--error-color); }
         .editor-canvas {
           min-width: 0;
-          overflow: auto;
-          padding: 28px clamp(20px, 4vw, 64px) 48px;
+          overflow: visible;
+          padding: 28px clamp(20px, 4vw, 64px) 72px;
         }
         .desktop-preview {
           background: var(--primary-background-color);
@@ -2387,6 +2397,7 @@ export class SidebarConfigDialog extends BaseEditor {
         .apply-state { align-items: center; color: var(--secondary-text-color); display: flex; font-size: .85rem; gap: 8px; min-width: 0; }
         .action-buttons { display: flex; flex-shrink: 0; gap: 6px; }
         .draft-recovery { margin: 10px 12px 0; }
+        .workbench-notice:empty { display: none; }
         .draft-recovery > div { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
         .draft-recovery div > div:first-child { display: grid; gap: 3px; }
         .draft-recovery span { color: var(--secondary-text-color); }

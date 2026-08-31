@@ -6,7 +6,7 @@ const LABELS: Record<string, string> = {
   bottom_groups: 'Bottom groups',
   bottom_items: 'Bottom items',
   bottom_grid_items: 'Bottom grid',
-  hidden_items: 'Visibility',
+  hidden_items: 'Hidden items',
   new_items: 'Custom items',
   notification: 'Notifications',
   visibility_templates: 'Visibility rules',
