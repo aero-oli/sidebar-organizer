@@ -1,3 +1,9 @@
+## [4.8.1](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.0...v4.8.1) (2026-08-31)
+
+### Bug Fixes
+
+* redesign settings workflow and scrolling ([7298fd9](https://github.com/aero-oli/sidebar-organizer/commit/7298fd945c2a6ab9b24aae1495a427464e8386fc))
+
 ## [4.8.0](https://github.com/aero-oli/sidebar-organizer/compare/v4.7.0...v4.8.0) (2026-08-31)
 
 ### Features
