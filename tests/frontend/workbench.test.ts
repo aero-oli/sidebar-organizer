@@ -4,6 +4,10 @@ import test from 'node:test';
 import type { ConfigSource } from '../../src/config';
 import { EditorDraftStorage } from '../../src/components/editor/workbench/draft-storage';
 import { EditorSessionController } from '../../src/components/editor/workbench/editor-session-controller';
+import {
+  collectNotificationSettings,
+  updateNotificationSetting,
+} from '../../src/components/editor/workbench/notification-settings';
 import { YamlConfigDocument } from '../../src/components/editor/workbench/yaml-config-document';
 
 class MemoryStorage implements Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
@@ -78,7 +82,7 @@ test('syntax issues expose line and column while retaining last valid config', (
   assert.ok(session.issues[0].column);
 });
 
-test('duplicate assignments are structured, positioned, and routed to Organize', () => {
+test('duplicate assignments are structured, positioned, and routed to Layout', () => {
   const storage = new EditorDraftStorage(new MemoryStorage());
   const session = makeSession(storage, {
     rawYaml: 'custom_groups:\n  Main:\n    - lovelace\nbottom_items:\n  - lovelace\n',
@@ -88,6 +92,25 @@ test('duplicate assignments are structured, positioned, and routed to Organize',
   assert.deepEqual(issue?.path, ['bottom_items', 0]);
   assert.equal(issue?.line, 5);
   assert.ok(issue?.column);
+});
+
+test('notification badges have one editor while preserving their config shape', () => {
+  const config = {
+    notification: { energy: '{{ states("sensor.energy") }}' },
+    new_items: [{ title: 'Weather link', icon: 'mdi:weather-cloudy', notification: '{{ 2 }}' }],
+  };
+  assert.deepEqual(collectNotificationSettings(config), {
+    energy: '{{ states("sensor.energy") }}',
+    'Weather link': '{{ 2 }}',
+  });
+
+  const changedCustomItem = updateNotificationSetting(config, 'Weather link', '{{ 3 }}');
+  assert.equal(changedCustomItem.new_items?.[0].notification, '{{ 3 }}');
+  assert.deepEqual(changedCustomItem.notification, config.notification);
+
+  const changedSystemPanel = updateNotificationSetting(config, 'energy', undefined);
+  assert.equal(changedSystemPanel.notification?.energy, undefined);
+  assert.equal(changedSystemPanel.new_items?.[0].notification, '{{ 2 }}');
 });
 
 test('drafts are isolated by user, source, and target', async () => {

@@ -31,6 +31,7 @@ import { property, query, state } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 
 import { SoPanelAll } from './shared/so-panel-all';
+import { collectNotificationSettings, updateNotificationSetting } from './workbench/notification-settings';
 
 @safeCustomElement('sidebar-dialog-panels')
 export class SidebarDialogPanels extends BaseEditor {
@@ -38,7 +39,7 @@ export class SidebarDialogPanels extends BaseEditor {
     super(CONFIG_SECTION.PANELS);
   }
   @property({ attribute: false }) _sidebarConfig!: SidebarConfig;
-  @property({ attribute: false }) workbenchMode?: 'organize' | 'rules';
+  @property({ type: String, attribute: 'workbench-mode', reflect: true }) workbenchMode?: 'organize' | 'rules';
 
   @state() private _selectedTab: PANEL_AREA = PANEL_AREA.ALL_ITEMS;
   @state() public _selectedBottom: BOTTOM_SECTION = BOTTOM_SECTION.BOTTOM_ITEMS;
@@ -102,10 +103,27 @@ export class SidebarDialogPanels extends BaseEditor {
   }
 
   protected render() {
-    const options =
-      this.workbenchMode === 'rules'
-        ? PanelAreaTabs.filter(({ value }) => value === PANEL_AREA.VISIBILITY || value === PANEL_AREA.NOTIFICATIONS)
-        : PanelAreaTabs;
+    if (this.workbenchMode === 'rules') {
+      return html`
+        <div class="rules-layout">
+          <so-panel-visibility
+            flattened
+            .hass=${this.hass}
+            ._store=${this._store}
+            ._sidebarConfig=${this._sidebarConfig}
+          ></so-panel-visibility>
+          <section class="rule-section">
+            <div class="rule-heading">
+              <h2>Notification badges</h2>
+              <p>Show a template result beside any sidebar item.</p>
+            </div>
+            ${this._renderNotificationConfig()}
+          </section>
+        </div>
+      `;
+    }
+
+    const options = PanelAreaTabs;
     const tabSelector = html` <ha-control-select
       .value=${this._selectedTab}
       .options=${options}
@@ -134,6 +152,7 @@ export class SidebarDialogPanels extends BaseEditor {
         .hass=${this.hass}
         ._store=${this._store}
         ._sidebarConfig=${this._sidebarConfig}
+        .singleScroll=${Boolean(this.workbenchMode)}
         @group-action=${this._handleGroupActionEvent}
         @navigate-section=${this._handleNavigateSection}
         @item-moved=${this._groupMoved}
@@ -150,8 +169,7 @@ export class SidebarDialogPanels extends BaseEditor {
 
   private _renderNotificationConfig() {
     const hassPanels = this.hass?.panels;
-    const newItems = this._sidebarConfig?.new_items?.map((item) => item.title) || [];
-    const items = this._dialog._initCombiPanels.filter((item) => !newItems.includes(item));
+    const items = this._dialog._initCombiPanels;
 
     const options = items.map((panel) => {
       const panelName = getPanelTitleFromUrlPath(this.hass, panel);
@@ -159,7 +177,7 @@ export class SidebarDialogPanels extends BaseEditor {
     });
 
     // Filter out items that are already in the notification config
-    const notifyConfig = this._sidebarConfig.notification || {};
+    const notifyConfig = collectNotificationSettings(this._sidebarConfig);
     const existingNotifications = Object.keys(notifyConfig);
     const itemToSelect = options.filter((item) => !existingNotifications.includes(item.value));
 
@@ -207,13 +225,7 @@ export class SidebarDialogPanels extends BaseEditor {
                         'Delete'
                       );
                       if (!confirmDelete) return;
-                      const notifyConfig = { ...(this._sidebarConfig.notification || {}) };
-                      delete notifyConfig[item.value];
-                      this._sidebarConfig = {
-                        ...this._sidebarConfig,
-                        notification: notifyConfig,
-                      };
-                      this._dispatchConfig(this._sidebarConfig);
+                      this._setNotificationSetting(item.value, undefined);
                     }}
                     ><ha-icon icon="mdi:trash-can-outline"></ha-icon
                   ></ha-icon-button>
@@ -247,7 +259,7 @@ export class SidebarDialogPanels extends BaseEditor {
     if (!this._selectedNotification) return nothing;
     const key = this._selectedNotification;
     const panelName = getPanelTitleFromUrlPath(this.hass, key) || key;
-    const notifyConfig = this._sidebarConfig.notification || {};
+    const notifyConfig = collectNotificationSettings(this._sidebarConfig);
     const notifyConfigValue = notifyConfig[key] || '';
     const headerBack = html`<div class="header-row ">
       <ha-icon-button .path=${mdiChevronLeft} @click=${() => (this._selectedNotification = null)}> </ha-icon-button>
@@ -480,19 +492,11 @@ export class SidebarDialogPanels extends BaseEditor {
   private _handleNotifyConfigChange(ev: CustomEvent) {
     const configValue = (ev as any).target.configValue;
     const value = ev.detail.value;
+    this._setNotificationSetting(configValue, value || undefined);
+  }
 
-    const notifyConfig = { ...(this._sidebarConfig.notification || {}) };
-    if (!value || value === '') {
-      delete notifyConfig[configValue];
-    }
-    if (value && value !== '') {
-      notifyConfig[configValue] = value;
-    }
-    this._sidebarConfig = {
-      ...this._sidebarConfig,
-      notification: notifyConfig,
-    };
-
+  private _setNotificationSetting(panel: string, value: string | undefined): void {
+    this._sidebarConfig = updateNotificationSetting(this._sidebarConfig, panel, value);
     this._dispatchConfig(this._sidebarConfig);
   }
 
@@ -1219,6 +1223,40 @@ export class SidebarDialogPanels extends BaseEditor {
         :host {
           scrollbar-width: thin;
           scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+        }
+        :host([workbench-mode]) .config-content {
+          gap: 0;
+          margin-top: 0;
+          min-height: 0;
+        }
+        :host([workbench-mode]) .selected-items-preview,
+        :host([workbench-mode]) .selector-container {
+          height: auto;
+          max-height: none;
+          overflow: visible;
+        }
+        .rules-layout {
+          display: grid;
+          gap: 28px;
+        }
+        .rule-section {
+          border-block-start: 1px solid var(--divider-color);
+          display: grid;
+          gap: 16px;
+          padding-block-start: 22px;
+        }
+        .rule-heading h2,
+        .rule-heading p {
+          margin: 0;
+        }
+        .rule-heading h2 {
+          font-size: 1.05rem;
+        }
+        .rule-heading p {
+          color: var(--secondary-text-color);
+          font-size: .9rem;
+          line-height: 1.4;
+          margin-top: 4px;
         }
         .groups-menu-header {
           top: 0;

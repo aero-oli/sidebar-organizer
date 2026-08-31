@@ -63,6 +63,7 @@ export class SoPanelAll extends BaseEditor {
   }
 
   @property({ attribute: false }) _sidebarConfig!: SidebarConfig;
+  @property({ type: Boolean, attribute: 'single-scroll', reflect: true }) singleScroll = false;
   @queryAll('ha-expansion-panel') private _expansionPanels!: HTMLElement[];
 
   @property({ attribute: false }) private _showByGroup = false;
@@ -125,7 +126,7 @@ export class SoPanelAll extends BaseEditor {
     const systemPanelData = {
       data: {
         items: panelsWithoutNewItems,
-        columns: ['url_path', 'group', 'notification', 'show_in_sidebar'] as NewItemConfigKeys[],
+        columns: ['url_path', 'group'] as NewItemConfigKeys[],
       },
       expansionOptions: this._computeExpansionOptions({ id: 'system-panels', header: 'System Panels' }),
     };
@@ -137,7 +138,7 @@ export class SoPanelAll extends BaseEditor {
         : nothing}
       ${filteredNewItems.length > 0
         ? this._renderTableGrouped({
-            data: { items: filteredNewItems, columns: ['group', 'notification'] },
+            data: { items: filteredNewItems, columns: ['group'] },
             expansionOptions: this._computeExpansionOptions({
               id: 'new-items',
               header: 'User Created',
@@ -410,6 +411,14 @@ export class SoPanelAll extends BaseEditor {
           position: relative;
           max-height: calc(var(--so-content-fullscreen-max-height) - 48px);
           overflow: auto;
+        }
+        :host([single-scroll]) .all-panels-wrapper,
+        :host([single-scroll]) .group-wrapper {
+          max-height: none;
+          overflow: visible;
+        }
+        :host([single-scroll]) .group-title {
+          position: static;
         }
         .panel-search {
           box-sizing: border-box;

@@ -823,7 +823,7 @@ export class SidebarDialogColors extends BaseEditor {
         }
         @media (max-width: 1499px) {
           :host {
-            --form-grid-column-count: unset;
+            --form-grid-column-count: 1;
           }
         }
         /* .color-container {

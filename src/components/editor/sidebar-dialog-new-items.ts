@@ -1,4 +1,4 @@
-import { mdiChevronLeft, mdiEmoticonExcited, mdiGestureTap, mdiMessageBadgeOutline } from '@mdi/js';
+import { mdiChevronLeft, mdiEmoticonExcited, mdiGestureTap } from '@mdi/js';
 import { SidebarConfig, NewItemConfig } from '@types';
 import { TRANSLATED_LABEL } from '@utilities/localize';
 import { safeCustomElement } from '@utilities/safe-custom-element';
@@ -74,23 +74,6 @@ export class SidebarDialogNewItems extends BaseEditor {
     },
   ] as const;
 
-  private _notificationSchema = [
-    {
-      type: 'expandable',
-      title: 'Notification badge template',
-      iconPath: mdiMessageBadgeOutline,
-      expanded: false,
-      schema: [
-        {
-          name: 'notification',
-          selector: {
-            template: {},
-          },
-        },
-      ],
-    },
-  ] as const;
-
   private _iconTemplateSchema = [
     {
       type: 'expandable',
@@ -135,14 +118,11 @@ export class SidebarDialogNewItems extends BaseEditor {
       ] as const
   );
 
-  protected render(): TemplateResult {
+  protected render(): TemplateResult | typeof nothing {
     if (!this.hass || !this._sidebarConfig) {
       return html`<div>Loading...</div>`;
     }
-    const itemsList = this._renderNewItemsList();
-    const selectedItem = this._renderSelectedItem();
-
-    return html` <div class="config-content">${this._selectedItemIndex === null ? itemsList : selectedItem}</div> `;
+    return this._selectedItemIndex === null ? this._renderNewItemsList() : this._renderSelectedItem();
   }
 
   private _renderNewItemsList(): TemplateResult | typeof nothing {
@@ -214,17 +194,12 @@ export class SidebarDialogNewItems extends BaseEditor {
 
     const actionData = pick(baseData, ['entity', 'tap_action', 'hold_action', 'double_tap_action']);
 
-    const notificationData = {
-      notification: baseData.notification,
-    };
-
     const iconTemplateData = {
       icon_template: baseData.icon_template,
     };
     const groupKeys = this.groupKeys;
     const baseSchema = this._configSchema(groupKeys);
     const actionSchema = this._actionsSchema;
-    const notificationSchema = this._notificationSchema;
     const iconTemplateSchema = this._iconTemplateSchema;
 
     return html`
@@ -252,7 +227,6 @@ export class SidebarDialogNewItems extends BaseEditor {
 
               ${this._createHaForm(dataWithoutActions, baseSchema, 'base')}
               ${this._createHaForm(actionData, actionSchema, 'actions')}
-              ${this._createHaForm(notificationData, notificationSchema, 'notification', 'notification-form')}
               ${this._createHaForm(iconTemplateData, iconTemplateSchema, 'icon_template', 'icon-template-form')}
             `
           : html`
@@ -358,12 +332,6 @@ export class SidebarDialogNewItems extends BaseEditor {
       if (JSON.stringify(currentActions) !== JSON.stringify(incoming)) {
         updates = {
           ...incoming,
-        };
-      }
-    } else if (configKey === 'notification') {
-      if (JSON.stringify(currentItem.notification) !== JSON.stringify(incoming.notification)) {
-        updates = {
-          notification: incoming.notification,
         };
       }
     } else if (configKey === 'icon_template') {
@@ -578,6 +546,10 @@ export class SidebarDialogNewItems extends BaseEditor {
     return [
       super.styles,
       css`
+        .config-content {
+          margin-top: 0;
+          min-height: 0;
+        }
         .item-name-row {
           padding: 0.5em;
           border: 1px solid var(--divider-color);

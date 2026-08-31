@@ -49,6 +49,7 @@ export class SoPanelVisibility extends BaseEditor {
   }
 
   @property({ attribute: false }) _sidebarConfig!: SidebarConfig;
+  @property({ type: Boolean, reflect: true }) flattened = false;
   @state() public _selectedSection: VISIBILITY_SECTION = VISIBILITY_SECTION.HIDDEN_ITEMS;
 
   protected updated(changedProperties: PropertyValues): void {
@@ -83,6 +84,25 @@ export class SoPanelVisibility extends BaseEditor {
   }
 
   protected render(): TemplateResult {
+    if (this.flattened) {
+      return html`
+        <section class="visibility-section">
+          <div class="section-heading">
+            <h2>Hidden items</h2>
+            <p>Remove items from the sidebar without changing their layout.</p>
+          </div>
+          ${this._renderHiddenItems()}
+        </section>
+        <section class="visibility-section">
+          <div class="section-heading">
+            <h2>Conditional visibility</h2>
+            <p>Use templates when an item or an entire group should only appear in certain conditions.</p>
+          </div>
+          ${this._renderVisibilityTemplates()}
+        </section>
+      `;
+    }
+
     const visibilitySections = VisibilitySectionKeys.map((key) => ({
       value: key,
       label: CONFIG_AREA_LABELS[key],
@@ -112,10 +132,9 @@ export class SoPanelVisibility extends BaseEditor {
     const selectorConfig = this._computeSelectorOptions(itemToChoose, 'list', false, false);
     const selectedValues = Object.entries(hiddenItems).map(([, item]) => item);
 
+    if (this.flattened) return this._createHaSelector(selectorConfig, selectedValues, 'hidden_items');
     return html` <div class="items-container" style="flex: none">
-      <div class="header-row flex-icon">
-        <span>HIDDEN ITEMS</span>
-      </div>
+      <div class="header-row flex-icon"><span>HIDDEN ITEMS</span></div>
       ${this._createHaSelector(selectorConfig, selectedValues, 'hidden_items')} ${this._renderSpacerDiv()}
     </div>`;
   }
@@ -132,6 +151,9 @@ export class SoPanelVisibility extends BaseEditor {
   }
 
   private _renderTemplateConfig(type: VisibleType, content: TemplateResult): TemplateResult {
+    if (this.flattened) {
+      return html`<div class="template-section"><h3>${type === VISIBLE_TYPE.ITEMS ? 'Items' : 'Groups'}</h3>${content}</div>`;
+    }
     const expansionOptions: ExpandablePanelProps['options'] = {
       header: TYPE_LABELS[type],
       noStyle: true,
@@ -264,7 +286,47 @@ export class SoPanelVisibility extends BaseEditor {
   }
 
   static get styles() {
-    return [super.styles, css``];
+    return [
+      super.styles,
+      css`
+        :host([flattened]) {
+          display: grid;
+          gap: 28px;
+        }
+        .visibility-section {
+          display: grid;
+          gap: 16px;
+        }
+        .visibility-section + .visibility-section {
+          border-block-start: 1px solid var(--divider-color);
+          padding-block-start: 22px;
+        }
+        .section-heading h2,
+        .section-heading p,
+        .template-section h3 {
+          margin: 0;
+        }
+        .section-heading h2 {
+          font-size: 1.05rem;
+        }
+        .section-heading p {
+          color: var(--secondary-text-color);
+          font-size: .9rem;
+          line-height: 1.4;
+          margin-top: 4px;
+        }
+        .template-section {
+          display: grid;
+          gap: 10px;
+        }
+        .template-section + .template-section {
+          margin-top: 8px;
+        }
+        .template-section h3 {
+          font-size: .95rem;
+        }
+      `,
+    ];
   }
 }
 declare global {

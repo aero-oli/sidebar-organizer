@@ -495,10 +495,10 @@ export class SidebarConfigDialog extends BaseEditor {
       icon: string;
       group: 'configure' | 'advanced';
     }> = [
-      { route: 'sidebar', label: 'Sidebar', description: 'Profile and sync', icon: 'mdi:account-cog-outline', group: 'configure' },
-      { route: 'organize', label: 'Organize', description: 'Groups and items', icon: 'mdi:format-list-group', group: 'configure' },
+      { route: 'sidebar', label: 'Profile', description: 'Configuration and sync', icon: 'mdi:account-cog-outline', group: 'configure' },
+      { route: 'organize', label: 'Layout', description: 'Groups, order and items', icon: 'mdi:format-list-group', group: 'configure' },
       { route: 'appearance', label: 'Appearance', description: 'Look and behaviour', icon: 'mdi:palette-outline', group: 'configure' },
-      { route: 'rules', label: 'Rules', description: 'Visibility and alerts', icon: 'mdi:filter-cog-outline', group: 'configure' },
+      { route: 'rules', label: 'Visibility', description: 'Hidden items and badges', icon: 'mdi:eye-settings-outline', group: 'configure' },
       { route: 'yaml', label: 'YAML', description: 'Source editor', icon: 'mdi:code-braces', group: 'advanced' },
       { route: 'review', label: 'Review & Apply', description: 'Validate and publish', icon: 'mdi:check-decagram-outline', group: 'advanced' },
     ];
@@ -613,25 +613,25 @@ export class SidebarConfigDialog extends BaseEditor {
 
   private _renderWorkbenchRoute(): TemplateResult {
     const route = this._workbenchRoute;
-    if (route === 'sidebar') return this._renderStage('Sidebar', 'Choose who this configuration applies to and how it is synchronized.', this._renderSettingsOverview());
+    if (route === 'sidebar') return this._renderStage('Profile', 'Choose which configuration you are editing and how it is synchronized.', this._renderSettingsOverview());
     if (route === 'appearance') return this._renderStage('Appearance', 'Tune the sidebar’s title, behaviour, dimensions, theme and colours.', this._renderBaseConfig());
     if (route === 'organize') {
       return this._renderStage(
-        'Organize',
-        'Arrange panels and groups, then add or edit custom items in the same workspace.',
+        'Layout',
+        'Arrange the sidebar. Visibility and notification badges are managed separately.',
         html`
-          <section class="workbench-card structure-builder">
-            <div class="card-heading"><div><h2>Structure builder</h2><p>Drag rows to reorder, or use each row’s menu for keyboard-friendly move actions.</p></div></div>
+          <section class="settings-section structure-builder">
+            <div class="section-heading"><div><h2>Groups and order</h2><p>Move panels between groups and choose where they appear.</p></div></div>
             ${this._renderPanelConfig('organize')}
           </section>
-          <details class="workbench-card add-items" open>
-            <summary><span><strong>Add or edit custom items</strong><small>Create links, panels and actions without leaving Organize.</small></span></summary>
+          <section class="settings-section custom-items">
+            <div class="section-heading"><div><h2>Custom items</h2><p>Create and edit links, panels and actions.</p></div></div>
             ${this._renderNewItemsConfig()}
-          </details>
+          </section>
         `
       );
     }
-    if (route === 'rules') return this._renderStage('Rules', 'Manage hidden items, visibility templates and notification badges.', this._renderPanelConfig('rules'));
+    if (route === 'rules') return this._renderStage('Visibility', 'Control what is shown and add optional notification badges.', this._renderPanelConfig('rules'));
     if (route === 'yaml') return this._renderYamlWorkbench();
     return this._renderReview();
   }
@@ -2314,6 +2314,17 @@ export class SidebarConfigDialog extends BaseEditor {
         .stage { display: grid; gap: 24px; margin: 0 auto; max-width: 920px; }
         .stage-heading h1 { font-size: 1.55rem; margin: 0; }
         .stage-heading p { color: var(--secondary-text-color); line-height: 1.45; margin: 5px 0 0; }
+        .settings-section {
+          border-block-start: 1px solid var(--divider-color);
+          display: grid;
+          gap: 18px;
+          min-width: 0;
+          padding-block-start: 22px;
+        }
+        .settings-section:first-of-type { border-block-start: 0; padding-block-start: 0; }
+        .section-heading h2, .section-heading p { margin: 0; }
+        .section-heading h2 { font-size: 1.05rem; }
+        .section-heading p { color: var(--secondary-text-color); font-size: .9rem; line-height: 1.4; margin-top: 4px; }
         .workbench-card {
           background: transparent;
           border: 0;
@@ -2514,6 +2525,12 @@ export class SidebarConfigDialog extends BaseEditor {
           max-height: calc(var(--mdc-dialog-min-height) - 50px);
           width: inherit;
           overflow-y: auto;
+        }
+
+        sidebar-dialog-panels[workbench-mode],
+        :host([fullscreen]) sidebar-dialog-panels[workbench-mode] {
+          max-height: none;
+          overflow: visible;
         }
 
         :host([fullscreen]) sidebar-dialog-panels {
