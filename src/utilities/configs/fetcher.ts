@@ -1,3 +1,5 @@
+import type { ProfileConfigInfo } from '../../config/types';
+
 import { CONFIG_NAME, CONFIG_PATH, DEFAULT_CONFIG, STORAGE } from '@constants';
 import { HaExtened, SidebarConfig } from '@types';
 import YAML from 'yaml';
@@ -49,8 +51,11 @@ export const fetchFileConfig = async (): Promise<SidebarConfig | undefined> => {
   }
 };
 
-export const fetchConfig = async (hass: HaExtened['hass']): Promise<SidebarConfig | undefined> => {
-  const source = await resolvePreferredConfigSource(hass, getConfigSource());
+export const fetchConfig = async (
+  hass: HaExtened['hass'],
+  profileInfo?: ProfileConfigInfo
+): Promise<SidebarConfig | undefined> => {
+  const source = await resolvePreferredConfigSource(hass, getConfigSource(), profileInfo);
   lastConfigLoadStatus = { errors: [], source, stale: false };
   setConfigSource(source);
   let config =

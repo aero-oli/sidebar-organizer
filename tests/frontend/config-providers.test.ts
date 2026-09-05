@@ -325,6 +325,45 @@ describe('HomeAssistantConfigProvider', () => {
 });
 
 describe('resolvePreferredConfigSource', () => {
+  it('reuses current-run personal profile metadata without another request', async () => {
+    const source = await resolvePreferredConfigSource(
+      { callWS: async () => assert.fail('Profile metadata was already fetched') } as never,
+      'home_assistant_config',
+      { available: true, profile_exists: true }
+    );
+    assert.equal(source, 'home_assistant_profile');
+  });
+
+  it('still checks shared availability when current-run metadata has no personal profile', async () => {
+    const calls: unknown[] = [];
+    const source = await resolvePreferredConfigSource(
+      {
+        callWS: async (message: Record<string, unknown>) => {
+          calls.push(message.type);
+          return { available: true };
+        },
+      } as never,
+      'static_yaml',
+      { available: true, profile_exists: false }
+    );
+    assert.equal(source, 'home_assistant_config');
+    assert.deepEqual(calls, ['sidebar_organizer/config/info']);
+  });
+
+  it('preserves legacy fallback with unavailable current-run metadata', async () => {
+    const source = await resolvePreferredConfigSource(
+      {
+        callWS: async (message: Record<string, unknown>) => {
+          assert.equal(message.type, 'sidebar_organizer/config/info');
+          throw new Error('Unknown command.');
+        },
+      } as never,
+      'static_yaml',
+      { available: false }
+    );
+    assert.equal(source, 'static_yaml');
+  });
+
   it('treats shared and personal profiles as raw server YAML sources', () => {
     assert.equal(isHomeAssistantConfigSource('home_assistant_config'), true);
     assert.equal(isHomeAssistantConfigSource('home_assistant_profile'), true);

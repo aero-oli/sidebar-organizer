@@ -1,4 +1,4 @@
-import type { ConfigSource } from './config/types';
+import type { ConfigSource, ProfileConfigInfo } from './config/types';
 
 import {
   ALERT_MSG,
@@ -261,7 +261,7 @@ export class SidebarOrganizer {
     try {
       compareHacsTagDiff(this._ha.hass);
       const profileProvider = new HomeAssistantProfileProvider(this.hass);
-      const profileInfo = await profileProvider.info();
+      const [profileInfo] = await Promise.all([profileProvider.info(), this._checkUserSidebarSettings()]);
       if (!this._lifecycle.isCurrent(generation)) return;
       this._activePersonalProfile = Boolean(profileInfo.available && profileInfo.profile_exists);
       this._effectiveRevision = profileInfo.revision;
@@ -269,7 +269,6 @@ export class SidebarOrganizer {
       if (profileInfo.available && !this._profileUnsubscribe) {
         this._profileUnsubscribe = await profileProvider.subscribe(this._handleProfileChanged);
       }
-      await this._checkUserSidebarSettings();
       if (this._activePersonalProfile) this._userHasSidebarSettings = false;
       await this._setupConfigBtn();
       if (this._userHasSidebarSettings || !this._lifecycle.isCurrent(generation)) {
@@ -278,11 +277,17 @@ export class SidebarOrganizer {
       }
 
       this._lifecycle.transition(generation, 'loading');
-      if (!(await this._getConfig()) || !this._lifecycle.isCurrent(generation)) {
+      // Settle both reads before releasing the run queue, including on failure:
+      // a late preference response must not mutate the next run's state.
+      const [configResult] = await Promise.allSettled([
+        this._getConfig(profileInfo),
+        this._loadSyncedPreferences(profileProvider),
+      ]);
+      if (configResult.status === 'rejected') throw configResult.reason;
+      if (!configResult.value || !this._lifecycle.isCurrent(generation)) {
         this._lifecycle.transition(generation, 'degraded');
         return;
       }
-      await this._loadSyncedPreferences(profileProvider);
       await this._watchScrollHideHeader();
       if (!this._lifecycle.isCurrent(generation)) return;
       this._captureSidebarSnapshot();
@@ -594,8 +599,8 @@ export class SidebarOrganizer {
     }
   };
 
-  private async _getConfig(): Promise<boolean> {
-    const config = await fetchConfig(this.hass);
+  private async _getConfig(profileInfo: ProfileConfigInfo): Promise<boolean> {
+    const config = await fetchConfig(this.hass, profileInfo);
     // console.log('Fetched Config:', config);
     if (!config) {
       console.log('No config found, stopping further setup');
@@ -1078,9 +1083,10 @@ export class SidebarOrganizer {
     const topItemsContainer = (await this._sidebar.selector.$.query(SELECTOR.SIDEBAR_BEFORE_SPACER_CONTAINER)
       .element) as HTMLElement;
 
-    // bottom list container is optional, may not exist if no bottom items configured
-    const bottomItemsContainer = (await this._sidebar.selector.$.query(SELECTOR.SIDEBAR_BOTTOM_LIST_CONTAINER)
-      .element) as HTMLElement | null;
+    // The sidebar is ready; absence of this optional container is valid.
+    // An async selector would spend its entire retry budget waiting for it.
+    const bottomItemsContainer =
+      sidebarShadowRoot?.querySelector<HTMLElement>(SELECTOR.SIDEBAR_BOTTOM_LIST_CONTAINER) ?? null;
 
     const topItems = await this._getContainerItems(topItemsContainer, promisableResultOptions);
     const bottomItems = bottomItemsContainer

@@ -1,4 +1,4 @@
-import type { ConfigSource, HassWithCallWS } from './types';
+import type { ConfigSource, HassWithCallWS, ProfileConfigInfo } from './types';
 
 import { HomeAssistantConfigProvider } from './providers/ha-config-provider';
 import { HomeAssistantProfileProvider } from './providers/ha-profile-provider';
@@ -8,11 +8,12 @@ export const isHomeAssistantConfigSource = (source: ConfigSource): boolean =>
 
 export const resolvePreferredConfigSource = async (
   hass: HassWithCallWS | undefined,
-  currentSource: ConfigSource
+  currentSource: ConfigSource,
+  knownProfileInfo?: ProfileConfigInfo
 ): Promise<ConfigSource> => {
   if (!hass) return currentSource;
 
-  const profileInfo = await new HomeAssistantProfileProvider(hass).info();
+  const profileInfo = knownProfileInfo ?? (await new HomeAssistantProfileProvider(hass).info());
   if (profileInfo.available && profileInfo.profile_exists) return 'home_assistant_profile';
 
   const info = await new HomeAssistantConfigProvider(hass).info();
