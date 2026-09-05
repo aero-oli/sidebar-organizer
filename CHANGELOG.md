@@ -1,3 +1,9 @@
+## [4.8.3](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.2...v4.8.3) (2026-09-05)
+
+### Bug Fixes
+
+* remove blocking HACS URL lookup from startup ([78a2a85](https://github.com/aero-oli/sidebar-organizer/commit/78a2a85b4d1059f9010dc8f0eb727e861f110814))
+
 ## [4.8.2](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.1...v4.8.2) (2026-09-05)
 
 ### Bug Fixes
