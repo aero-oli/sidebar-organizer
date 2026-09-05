@@ -66,6 +66,7 @@ import { HomeAssistantStylesManager } from 'home-assistant-styles-manager';
 import { SoGroupDivider } from './components/so-group-divider';
 import { areGroupsCollapsed, resolveCollapsedGroups, setGroupsCollapsed } from './config/preferences';
 import { HomeAssistantProfileProvider } from './config/providers/ha-profile-provider';
+import { waitForHass } from './runtime/hass-ready';
 import { RuntimeLifecycle } from './runtime/lifecycle';
 import { SerialTaskQueue } from './runtime/serial-task-queue';
 import { DIVIDER_ADDED_STYLE, DRAWER_STYLE, HA_MAIN_CUSTOM_WIDTH_STYLE, HUI_ROOT_STYLE } from './sidebar-css';
@@ -75,14 +76,21 @@ export class SidebarOrganizer {
     const instance = new HAQuerySelector();
     instance.addEventListener(HAQuerySelectorEvent.ON_LISTEN, async (event) => {
       const { HOME_ASSISTANT, HA_DRAWER, HA_SIDEBAR } = event.detail;
-      this._ha = (await HOME_ASSISTANT.element) as HaExtened;
-      setActiveStorageUser(this.hass.user?.id);
-      this._haDrawer = (await HA_DRAWER.element) as HaDrawer;
-      this.HaSidebar = await HA_SIDEBAR.element;
-      this.sideBarRoot = (await HA_SIDEBAR.selector.$.element) as ShadowRoot;
-      this._store = new Store(this._ha, this);
-      this._dialogManager = new DialogHandler(this._ha, this);
-      this.run();
+      try {
+        this._ha = (await HOME_ASSISTANT.element) as HaExtened;
+        if (!this._ha) return;
+        const hass = await waitForHass(() => this._ha.hass);
+        setActiveStorageUser(hass.user!.id);
+        this._haDrawer = (await HA_DRAWER.element) as HaDrawer;
+        this.HaSidebar = await HA_SIDEBAR.element;
+        this.sideBarRoot = (await HA_SIDEBAR.selector.$.element) as ShadowRoot;
+        if (!this._haDrawer || !this.HaSidebar || !this.sideBarRoot) return;
+        this._store = new Store(this._ha, this);
+        this._dialogManager = new DialogHandler(this._ha, this);
+        await this.run();
+      } catch (err) {
+        LOGGER.error('Sidebar Organizer could not initialise Home Assistant:', err);
+      }
     });
 
     instance.addEventListener(
