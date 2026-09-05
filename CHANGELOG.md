@@ -1,3 +1,9 @@
+## [4.8.4](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.3...v4.8.4) (2026-09-05)
+
+### Bug Fixes
+
+* wait for authenticated Home Assistant before sidebar startup ([5bd85cb](https://github.com/aero-oli/sidebar-organizer/commit/5bd85cb6816ebd780d759849253b99dd54f9710d))
+
 ## [4.8.3](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.2...v4.8.3) (2026-09-05)
 
 ### Bug Fixes
