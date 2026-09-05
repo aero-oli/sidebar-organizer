@@ -1,5 +1,4 @@
 import { NAMESPACE } from '@constants';
-import { getPromisableResult } from 'get-promisable-result';
 
 import pjson from '../../package.json';
 import { HomeAssistant } from '../types/ha';
@@ -10,24 +9,14 @@ const NAME_RGX = /sidebar-organizer.js/i;
 const HACS_URL_RGX = /\/hacsfiles.*$/;
 const HACS_TAG_RGX = /[?&]hacstag=(\d+)/;
 
-const loadedScripts = document.scripts;
-
-const loadedUrl = await getPromisableResult<string>(
-  () => {
-    const script = Array.from(loadedScripts).find((s) => NAME_RGX.test(s.src));
-    return script?.src || '';
-  },
-  (result: string) => result.length > 0,
-  {
-    retries: 100,
-    delay: 50,
-    shouldReject: false,
-  }
-);
-
 export function compareHacsTagDiff(hass: HomeAssistant): void {
+  // Integration modules loaded with import() have no script src to inspect.
+  // This legacy diagnostic must never hold up sidebar startup waiting for one.
+  const loadedScripts = document.scripts;
+  const loadedUrl = Array.from(loadedScripts).find((script) => NAME_RGX.test(script.src))?.src;
+  if (!loadedUrl) return;
   const configUrl = getConfigUrl(loadedScripts);
-  if (!loadedUrl || !configUrl) {
+  if (!configUrl) {
     return;
   }
   const hacsUrlMatch = loadedUrl?.match(HACS_URL_RGX)?.[0];
