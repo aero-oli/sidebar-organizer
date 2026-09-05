@@ -1,3 +1,9 @@
+## [4.8.2](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.1...v4.8.2) (2026-09-05)
+
+### Bug Fixes
+
+* speed up sidebar customization loading ([f44ee47](https://github.com/aero-oli/sidebar-organizer/commit/f44ee47ad53fbb6ec52f211495adf5300cc2b4ac))
+
 ## [4.8.1](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.0...v4.8.1) (2026-08-31)
 
 ### Bug Fixes
