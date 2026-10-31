@@ -162,6 +162,22 @@ export class EditorSessionController {
     this.onChange?.(this.snapshot);
   }
 
+  /** Update only the published baseline; edits made during a save stay recoverable. */
+  public acknowledgePublished(rawYaml: string, config: SidebarConfig, revision?: string | null): void {
+    this.baselineRawYaml = rawYaml;
+    this.baselineConfig = structuredClone(config);
+    this.baselineRevision = revision ?? this.baselineRevision;
+    if (this.dirty) {
+      this.draftSuppressed = false;
+      clearTimeout(this.draftTimer);
+      this.draftTimer = undefined;
+      this.writeDraft();
+    } else {
+      this.discardDraft();
+    }
+    this.onChange?.(this.snapshot);
+  }
+
   public destroy(): void {
     clearTimeout(this.draftTimer);
     if (this.dirty && !this.draftSuppressed) this.writeDraft();

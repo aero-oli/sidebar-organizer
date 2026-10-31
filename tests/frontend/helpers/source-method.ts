@@ -32,6 +32,20 @@ export const loadClassMethod = (
     body
   );
   const printed = ts.createPrinter().printNode(ts.EmitHint.Expression, expression, source);
+  if (/\bsuper\s*[.[]/.test(callable.body.getText(source))) {
+    // Keep a method home object for lifecycle super calls; callers can supply a
+    // baseClass when they need to observe them rather than use the no-op base.
+    const method = ts.factory.createMethodDeclaration(
+      expression.modifiers, undefined, 'sourceMethod', undefined, undefined,
+      callable.parameters, callable.type, body
+    );
+    const memberText = ts.createPrinter().printNode(ts.EmitHint.Unspecified, method, source);
+    const { baseClass = class { connectedCallback() {} disconnectedCallback() {} }, ...methodBindings } = bindings;
+    const { outputText } = ts.transpileModule(`class SourceMethod extends BaseClass { ${memberText} }`, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    });
+    return new Function('BaseClass', ...Object.keys(methodBindings), `${outputText}\nreturn SourceMethod.prototype.sourceMethod;`)(baseClass, ...Object.values(methodBindings));
+  }
   const { outputText } = ts.transpileModule(`const sourceMethod = ${printed};`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   });

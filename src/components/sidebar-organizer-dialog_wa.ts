@@ -15,7 +15,7 @@ import { ConfigSource } from '../config';
 import { HA, SidebarConfig } from '../types';
 import { HassDialog } from '../types/dialog-manager';
 import { fireEvent } from '../utilities/fire_event';
-import { SidebarConfigDialog } from './sidebar-dialog';
+import { SidebarConfigDialog, type PublishedConfigSave } from './sidebar-dialog';
 
 @safeCustomElement('sidebar-organizer-dialog-wa')
 export class SidebarOrganizerDialogWA extends LitElement implements HassDialog<SidebarConfigDialogParams> {
@@ -68,39 +68,49 @@ export class SidebarOrganizerDialogWA extends LitElement implements HassDialog<S
   }
 
   private async _handleSaveConfig(): Promise<void> {
+    const configDialog = this._configDialog;
+    if (!configDialog) return;
+    let published: PublishedConfigSave | undefined;
     if (!this._canSaveConfig) {
-      const message = this._configDialog.saveBlockedReason || 'This configuration cannot be saved yet.';
+      const message = configDialog.saveBlockedReason || 'This configuration cannot be saved yet.';
       console.warn(message);
       showToast(this, {
         message,
         duration: 5000,
       });
       return;
-    } else if (this._configDialog._useConfigFile && this._configValid) {
+    } else if (configDialog._useConfigFile && this._configValid) {
       // If using config file, we save the config to the file
-      await this._configDialog._handleInvalidConfig('save');
+      await configDialog._handleInvalidConfig('save');
       // After saving to storage, _useConfigFile will be set to false by _handleInvalidConfig
       // Continue with the rest of the save logic below
-    } else if (this._configDialog._configSource === 'home_assistant_config' && this._configValid) {
-      const saved = await this._configDialog._saveHomeAssistantConfig();
+    } else if (configDialog._configSource === 'home_assistant_config' && this._configValid) {
+      const saved = await configDialog._saveHomeAssistantConfig();
       if (!saved) return;
-    } else if (this._configDialog._configSource === 'home_assistant_profile' && this._configValid) {
-      const saved = await this._configDialog._saveHomeAssistantProfile();
+      published = saved;
+    } else if (configDialog._configSource === 'home_assistant_profile' && this._configValid) {
+      const saved = await configDialog._saveHomeAssistantProfile();
       if (!saved) return;
+      published = saved;
     }
-    const config = this._configDialog!._sidebarConfig;
-    const useConfigFile = this._configDialog!._useConfigFile;
-    const configSource = this._configDialog!._configSource;
-    const detail = {
+    const config = configDialog._sidebarConfig;
+    const useConfigFile = configDialog._useConfigFile;
+    const configSource = configDialog._configSource;
+    const detail = published || {
       config,
       configSource,
-      profileUserId: this._configDialog.selectedProfileUserId,
+      profileUserId: configDialog.selectedProfileUserId,
       useConfigFile: useConfigFile,
     };
 
-    fireEvent(this, HA_EVENT.SIDEBAR_CONFIG_SAVED, detail);
-    this._configDialog._markSessionApplied();
-    this._dialogClosed();
+    fireEvent(this.isConnected ? this : window, HA_EVENT.SIDEBAR_CONFIG_SAVED, detail);
+    if (!published) configDialog._markSessionApplied();
+    if (
+      this.isConnected && this._configDialog === configDialog &&
+      (!published || (configDialog._isPublishedTargetCurrent(published) && !configDialog.hasUnsavedChanges))
+    ) {
+      this._dialogClosed();
+    }
   }
 
   private _renderContent(): TemplateResult {

@@ -71,6 +71,13 @@ import {
 import { SidebarOrganizerDialog } from './sidebar-organizer-dialog';
 import { SidebarOrganizerDialogWA } from './sidebar-organizer-dialog_wa';
 
+export interface PublishedConfigSave {
+  config: SidebarConfig;
+  configSource: ConfigSource;
+  profileUserId?: string;
+  useConfigFile: boolean;
+}
+
 export interface ConfigChangedEvent {
   config: SidebarConfig;
 }
@@ -167,6 +174,8 @@ export class SidebarConfigDialog extends BaseEditor {
     this._profileSubscription.dispose();
     this._configSubscription.dispose();
     this._session?.destroy();
+    this._session = undefined;
+    this._sessionIdentity = undefined;
   }
 
   public get hasUnsavedChanges(): boolean {
@@ -198,7 +207,7 @@ export class SidebarConfigDialog extends BaseEditor {
     if (this._session?.issues.some((issue) => issue.severity === 'error')) {
       return this._session.yamlValid
         ? 'Resolve the validation errors before applying.'
-        : 'Fix the YAML syntax errors before applying.';
+        : 'Fix the YAML errors before applying.';
     }
     if (this._invalidConfig && hasBlockingConfigErrors(this._invalidConfig)) {
       return 'A panel is assigned more than once. Remove the duplicate assignment before saving.';
@@ -460,9 +469,14 @@ export class SidebarConfigDialog extends BaseEditor {
     return this._renderWorkbench();
   }
 
+  private _currentSessionIdentity(): string {
+    const target = this._configSource === 'home_assistant_profile' ? this._selectedProfile : 'shared';
+    return `${this.hass.user?.id || 'anonymous'}:${this._configSource}:${target}:${this._baselineRevision || ''}`;
+  }
+
   private _ensureSession(): void {
     const target = this._configSource === 'home_assistant_profile' ? this._selectedProfile : 'shared';
-    const identity = `${this.hass.user?.id || 'anonymous'}:${this._configSource}:${target}:${this._baselineRevision || ''}`;
+    const identity = this._currentSessionIdentity();
     if (this._session && this._sessionIdentity === identity) return;
     this._session?.destroy();
     this._sessionIdentity = identity;
@@ -847,13 +861,14 @@ export class SidebarConfigDialog extends BaseEditor {
   };
 
   private _reloadLatestForRecovery = async (): Promise<void> => {
+    if (this._saving) return;
     const confirmed = await showConfirmDialog(
       this,
       'Reload the latest Home Assistant version? Your current draft will remain available as a recovery copy.',
       'Reload latest',
       'Keep editing'
     );
-    if (!confirmed) return;
+    if (!confirmed || this._saving) return;
     this._session?.destroy();
     this._session = undefined;
     this._sessionIdentity = undefined;
@@ -864,8 +879,9 @@ export class SidebarConfigDialog extends BaseEditor {
   };
 
   private _discardDraft = async (): Promise<void> => {
+    if (this._saving) return;
     const confirmed = await showConfirmDialog(this, 'Discard this local draft and restore the published configuration?', 'Discard', 'Keep editing');
-    if (!confirmed) return;
+    if (!confirmed || this._saving) return;
     this._session!.discardDraft();
     this._rawYaml = this._baselineRawYaml;
     this._sidebarConfig = structuredClone(this._baselineConfig);
@@ -1014,7 +1030,7 @@ export class SidebarConfigDialog extends BaseEditor {
     const canManageSelected = Boolean(
       this._selectedProfile !== 'shared' &&
       (this.hass.user?.is_admin || this._selectedProfile === currentUserId) &&
-      this._profileInfo.allow_write
+      this._profileInfo.allow_write && !this._saving
     );
 
     return html`
@@ -1027,6 +1043,7 @@ export class SidebarConfigDialog extends BaseEditor {
           .hass=${this.hass}
           .selector=${{ select: { mode: 'dropdown', options } }}
           .value=${this._selectedProfile}
+          .disabled=${this._saving}
           @value-changed=${this._handleProfileSelected}
         ></ha-selector>
         <span>
@@ -1160,6 +1177,7 @@ export class SidebarConfigDialog extends BaseEditor {
         <ha-button
           appearance="plain"
           size="s"
+          .disabled=${this._saving}
           @click=${this._configSource === 'home_assistant_profile'
             ? this._reloadHomeAssistantProfile
             : this._reloadHomeAssistantConfig}
@@ -1255,6 +1273,7 @@ export class SidebarConfigDialog extends BaseEditor {
             this._sidebarConfig = newConfig;
             if (this._configSource === 'home_assistant_config' || this._configSource === 'home_assistant_profile') {
               this._rawYaml = content;
+              this._session?.setRawYaml(content);
             }
             if (this._configSource === 'home_assistant_config' || this._configSource === 'home_assistant_profile') {
               const saved =
@@ -1529,7 +1548,7 @@ export class SidebarConfigDialog extends BaseEditor {
   private _handleProfileSelected = async (event: CustomEvent<{ value: string }>): Promise<void> => {
     event.stopPropagation();
     const selected = event.detail.value;
-    if (!selected || selected === this._selectedProfile) return;
+    if (this._saving || !selected || selected === this._selectedProfile) return;
     if (this.hasUnsavedChanges) {
       const discard = await showConfirmDialog(
         this,
@@ -1543,6 +1562,7 @@ export class SidebarConfigDialog extends BaseEditor {
       }
     }
 
+    if (this._saving) return;
     this._selectedProfile = selected;
     this._clearServerYamlDraft();
     this._configLoaded = false;
@@ -1615,14 +1635,18 @@ export class SidebarConfigDialog extends BaseEditor {
     await this._subscribeSelectedProfile(userId, loadGeneration, subscriptionGeneration);
   };
 
-  public _saveHomeAssistantProfile = async (): Promise<boolean> =>
+  public _saveHomeAssistantProfile = async (): Promise<PublishedConfigSave | false> =>
     await this._withSaveLock(this._saveHomeAssistantProfileUnlocked);
 
-  private _saveHomeAssistantProfileUnlocked = async (): Promise<boolean> => {
+  private _saveHomeAssistantProfileUnlocked = async (): Promise<PublishedConfigSave | false> => {
     if (this._selectedProfile === 'shared') return this._saveHomeAssistantConfigUnlocked();
-    const provider = new HomeAssistantProfileProvider(this.hass, this._selectedProfile);
+    const snapshot = this._capturePublishedSave();
+    const userId = snapshot.detail.profileUserId!;
+    const baselineRevision = this._baselineRevision;
+    const expectedRevision = this._profileInfo.revision;
+    const provider = new HomeAssistantProfileProvider(this.hass, userId);
     const latestInfo = await provider.info();
-    const changedSinceLoad = Boolean(this._baselineRevision && latestInfo.revision !== this._baselineRevision);
+    const changedSinceLoad = Boolean(baselineRevision && latestInfo.revision !== baselineRevision);
     if (
       changedSinceLoad &&
       !(await showConfirmDialog(
@@ -1635,7 +1659,7 @@ export class SidebarConfigDialog extends BaseEditor {
       this._workbenchRoute = 'review';
       return false;
     }
-    const yaml = this._rawYaml.trim() ? this._rawYaml : YAML.stringify(this._sidebarConfig);
+    const yaml = snapshot.yaml;
     const validation = await provider.validate(yaml);
     if (!validation.valid) {
       this._haConfigErrors = validation.errors;
@@ -1644,20 +1668,19 @@ export class SidebarConfigDialog extends BaseEditor {
     }
 
     try {
-      this._profileInfo = await provider.write(yaml, changedSinceLoad ? latestInfo.revision : this._profileInfo.revision);
-      this._rawYaml = yaml;
-      this._baselineRawYaml = yaml;
-      this._haConfigErrors = [];
-      this._baselineConfig = structuredClone(this._sidebarConfig);
-      this._baselineRevision = this._profileInfo.revision;
-      const selectedUser = this._profileUsers.find((user) => user.id === this._selectedProfile);
+      const info = await provider.write(yaml, changedSinceLoad ? latestInfo.revision : expectedRevision);
+      if (this._isPublishedTargetCurrent(snapshot.detail)) {
+        this._profileInfo = info;
+        this._acceptPublishedSave(snapshot, info.revision);
+      }
+      const selectedUser = this._profileUsers.find((user) => user.id === userId);
       if (selectedUser) selectedUser.profile_exists = true;
-      if (this._selectedProfile === this.hass.user?.id) {
-        setStorage(getHaConfigCacheKey('home_assistant_profile', this._selectedProfile), this._sidebarConfig);
-        if (this._profileInfo.revision) setStorage(STORAGE.HA_CONFIG_REVISION, this._profileInfo.revision);
+      if (userId === this.hass.user?.id) {
+        setStorage(getHaConfigCacheKey('home_assistant_profile', userId), snapshot.detail.config);
+        if (info.revision) setStorage(STORAGE.HA_CONFIG_REVISION, info.revision);
       }
       showToast(this, { message: 'Saved Sidebar Organizer user profile.' });
-      return true;
+      return snapshot.detail;
     } catch (err) {
       const message = this._formatSaveError(err);
       this._haConfigErrors = [message];
@@ -1677,6 +1700,7 @@ export class SidebarConfigDialog extends BaseEditor {
   };
 
   private _deleteSelectedProfile = async (): Promise<void> => {
+    if (this._saving) return;
     if (this._selectedProfile === 'shared') return;
     const confirmed = await showConfirmDialog(
       this,
@@ -1684,7 +1708,7 @@ export class SidebarConfigDialog extends BaseEditor {
       'Reset profile',
       'Cancel'
     );
-    if (!confirmed) return;
+    if (!confirmed || this._saving) return;
     try {
       const provider = new HomeAssistantProfileProvider(this.hass, this._selectedProfile);
       this._profileInfo = await provider.delete(this._profileInfo.revision);
@@ -1706,6 +1730,7 @@ export class SidebarConfigDialog extends BaseEditor {
   };
 
   private _copyIntoSelectedProfile = async (): Promise<void> => {
+    if (this._saving) return;
     if (this._selectedProfile === 'shared') return;
     const confirmed = await showConfirmDialog(
       this,
@@ -1715,7 +1740,7 @@ export class SidebarConfigDialog extends BaseEditor {
       'Copy profile',
       'Cancel'
     );
-    if (!confirmed) return;
+    if (!confirmed || this._saving) return;
     try {
       this._profileInfo = await new HomeAssistantProfileProvider(this.hass).copy(
         this._copySource,
@@ -1750,10 +1775,10 @@ export class SidebarConfigDialog extends BaseEditor {
         return;
       }
       if (
-        info.profile_exists === this._profileInfo.profile_exists &&
-        (!info.revision || info.revision === this._profileInfo.revision)
-      )
-        return;
+        this._saving ||
+        (info.profile_exists === this._profileInfo.profile_exists &&
+          (!info.revision || info.revision === this._profileInfo.revision))
+      ) return;
       if (!this.hasUnsavedChanges) {
         await this._reloadHomeAssistantProfile();
         return;
@@ -1764,7 +1789,7 @@ export class SidebarConfigDialog extends BaseEditor {
         'Reload',
         'Later'
       );
-      if (reload) await this._reloadHomeAssistantProfile();
+      if (reload && !this._saving) await this._reloadHomeAssistantProfile();
     });
     if (!this._connected || loadGeneration !== this._profileLoadGeneration || this._selectedProfile !== userId) {
       unsubscribe();
@@ -1892,10 +1917,45 @@ export class SidebarConfigDialog extends BaseEditor {
     this._configLoaded = true;
   };
 
-  public _saveHomeAssistantConfig = async (): Promise<boolean> =>
+  private _capturePublishedSave() {
+    return {
+      detail: {
+        config: structuredClone(this._sidebarConfig),
+        configSource: this._configSource,
+        profileUserId: this.selectedProfileUserId,
+        useConfigFile: this._useConfigFile,
+      } satisfies PublishedConfigSave,
+      yaml: this._rawYaml.trim() ? this._rawYaml : YAML.stringify(this._sidebarConfig),
+      draftRawYaml: this._rawYaml,
+      session: this._session,
+    };
+  }
+
+  public _isPublishedTargetCurrent(detail: PublishedConfigSave): boolean {
+    return this._configSource === detail.configSource && this.selectedProfileUserId === detail.profileUserId;
+  }
+
+  private _acceptPublishedSave(snapshot: ReturnType<SidebarConfigDialog['_capturePublishedSave']>, revision?: string | null): void {
+    // A request publishes its captured document, never edits made while it was pending.
+    if (this._rawYaml === snapshot.draftRawYaml) this._rawYaml = snapshot.yaml;
+    this._baselineRawYaml = snapshot.yaml;
+    this._baselineConfig = structuredClone(snapshot.detail.config);
+    this._baselineRevision = revision;
+    this._haConfigErrors = [];
+    if (this._session === snapshot.session) {
+      this._session?.acknowledgePublished(snapshot.yaml, snapshot.detail.config, revision);
+      this._sessionIdentity = this._currentSessionIdentity();
+    }
+    this.requestUpdate();
+  }
+
+  public _saveHomeAssistantConfig = async (): Promise<PublishedConfigSave | false> =>
     await this._withSaveLock(this._saveHomeAssistantConfigUnlocked);
 
-  private _saveHomeAssistantConfigUnlocked = async (): Promise<boolean> => {
+  private _saveHomeAssistantConfigUnlocked = async (): Promise<PublishedConfigSave | false> => {
+    const snapshot = this._capturePublishedSave();
+    const baselineRevision = this._baselineRevision;
+    const lastModified = this._lastLoadedHaConfigModified;
     await this._refreshHaConfigInfo();
     if (!this._haConfigInfo.available) {
       await showAlertDialog(this, ALERT_MSG.HA_CONFIG_UNAVAILABLE);
@@ -1908,9 +1968,9 @@ export class SidebarConfigDialog extends BaseEditor {
 
     const provider = new HomeAssistantConfigProvider(this.hass);
     const latestInfo = await provider.info();
-    const changedSinceLoad = this._baselineRevision
-      ? latestInfo.revision !== this._baselineRevision
-      : isHaConfigModified(this._lastLoadedHaConfigModified, latestInfo.last_modified);
+    const changedSinceLoad = baselineRevision
+      ? latestInfo.revision !== baselineRevision
+      : isHaConfigModified(lastModified, latestInfo.last_modified);
     if (
       changedSinceLoad &&
       !(await showConfirmDialog(
@@ -1923,7 +1983,7 @@ export class SidebarConfigDialog extends BaseEditor {
       return false;
     }
 
-    const yaml = this._rawYaml.trim() ? this._rawYaml : YAML.stringify(this._sidebarConfig);
+    const yaml = snapshot.yaml;
     const validation = await provider.validate(yaml);
     if (!validation.valid) {
       this._haConfigErrors = validation.errors;
@@ -1932,21 +1992,20 @@ export class SidebarConfigDialog extends BaseEditor {
     }
 
     try {
-      const expectedRevision = changedSinceLoad ? latestInfo.revision : this._baselineRevision;
-      this._haConfigInfo = await provider.write(yaml, expectedRevision);
-      this._haDiagnostics = { ...this._haDiagnostics, ...this._haConfigInfo };
-      this._lastLoadedHaConfigModified = this._haConfigInfo.last_modified ?? undefined;
-      this._rawYaml = yaml;
-      this._baselineRawYaml = yaml;
-      this._haConfigErrors = [];
-      this._baselineConfig = structuredClone(this._sidebarConfig);
-      this._baselineRevision = this._haConfigInfo.revision;
-      setStorage(getHaConfigCacheKey('home_assistant_config', this.hass.user?.id), this._sidebarConfig);
-      if (this._haConfigInfo.last_modified != null) {
-        setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, this._haConfigInfo.last_modified);
+      const expectedRevision = changedSinceLoad ? latestInfo.revision : baselineRevision;
+      const info = await provider.write(yaml, expectedRevision);
+      if (this._isPublishedTargetCurrent(snapshot.detail)) {
+        this._haConfigInfo = info;
+        this._haDiagnostics = { ...this._haDiagnostics, ...info };
+        this._lastLoadedHaConfigModified = info.last_modified ?? undefined;
+        this._acceptPublishedSave(snapshot, info.revision);
+      }
+      setStorage(getHaConfigCacheKey('home_assistant_config', this.hass.user?.id), snapshot.detail.config);
+      if (info.last_modified != null) {
+        setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, info.last_modified);
       }
       showToast(this, { message: ALERT_MSG.HA_CONFIG_SAVE_SUCCESS });
-      return true;
+      return snapshot.detail;
     } catch (err) {
       const message = this._formatSaveError(err);
       this._haConfigErrors = [message];
@@ -1955,7 +2014,7 @@ export class SidebarConfigDialog extends BaseEditor {
     }
   };
 
-  private async _withSaveLock(action: () => Promise<boolean>): Promise<boolean> {
+  private async _withSaveLock<T>(action: () => Promise<T>): Promise<T | false> {
     if (this._saving) return false;
     this._saving = true;
     this.requestUpdate();
@@ -2067,7 +2126,7 @@ export class SidebarConfigDialog extends BaseEditor {
   }
 
   private _handleSharedConfigChanged = async (info: ConfigProviderInfo): Promise<void> => {
-    if (!info.revision || info.revision === this._haConfigInfo.revision) return;
+    if (this._saving || !info.revision || info.revision === this._haConfigInfo.revision) return;
     this._haConfigInfo = { ...this._haConfigInfo, ...info };
     if (!this.hasUnsavedChanges) {
       await this._reloadHomeAssistantConfig();
@@ -2079,7 +2138,7 @@ export class SidebarConfigDialog extends BaseEditor {
       'Reload',
       'Keep editing'
     );
-    if (reload) await this._reloadHomeAssistantConfig();
+    if (reload && !this._saving) await this._reloadHomeAssistantConfig();
   };
 
   private _legacyFrontendResourceLoaded(): boolean {
