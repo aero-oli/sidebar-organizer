@@ -1,3 +1,23 @@
+## [4.8.5](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.4...v4.8.5) (2026-10-31)
+
+### Bug Fixes
+
+* Correct sidebar editor controls and responsive preview ([cf979cd](https://github.com/aero-oli/sidebar-organizer/commit/cf979cdb811dd8ffeb1f1606563c6150c3406fec))
+* Keep backend revisions consistent with returned content ([b78b079](https://github.com/aero-oli/sidebar-organizer/commit/b78b079754ecc2f3c6764988a28e5734924264c3))
+* Preserve sidebar visibility and notification updates ([55ac2cd](https://github.com/aero-oli/sidebar-organizer/commit/55ac2cd130e9547d6be3b42aa168d97867aa78da))
+* Preserve unpublished edits during asynchronous sidebar saves ([27e1482](https://github.com/aero-oli/sidebar-organizer/commit/27e14826e7f3f07fdbc19d17c4f5ab32e1950558))
+* Recognize category-prefixed commits in releases ([67a240d](https://github.com/aero-oli/sidebar-organizer/commit/67a240db00f393e8ccd26bc4eba5b682312479ce))
+* Restore sidebar appearance and dispose obsolete handlers ([1e224f0](https://github.com/aero-oli/sidebar-organizer/commit/1e224f0a071a32cd3aa7ab3a057fd580197609bb))
+* Validate configurations before replacing recovery caches ([cc1ce81](https://github.com/aero-oli/sidebar-organizer/commit/cc1ce817072bd3aa6d50eb62bdd0356b851c384e))
+
+### Improvements
+
+* Defer sidebar editor bundles until the dialog opens ([878093d](https://github.com/aero-oli/sidebar-organizer/commit/878093d3303f91c1354933aebdfe1dcc7891058b))
+
+### Documentation
+
+* Refresh sidebar lifecycle and contributor guidance ([eb19a2f](https://github.com/aero-oli/sidebar-organizer/commit/eb19a2fc7810ea5a8a95fdd24d9f0d3e0e94ad1d))
+
 ## [4.8.4](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.3...v4.8.4) (2026-09-05)
 
 ### Bug Fixes
