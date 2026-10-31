@@ -32,6 +32,7 @@ export const cleanItemsFromAllPanels = (
 ): SidebardPanelConfig => {
   const configToUpdate = pick(baseConfig, [
     PANEL_TYPE.CUSTOM_GROUPS,
+    PANEL_TYPE.BOTTOM_GROUPS,
     PANEL_TYPE.BOTTOM_ITEMS,
     PANEL_TYPE.HIDDEN_ITEMS,
     PANEL_TYPE.BOTTOM_GRID_ITEMS,

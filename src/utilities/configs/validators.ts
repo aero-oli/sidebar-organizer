@@ -41,24 +41,26 @@ export const InvalidItemLabels: Record<InvalidItemKeys, string> = {
  * stored sidebar unusable for everyone. Duplicate assignments are the one
  * contextual error that is ambiguous enough to block saving/loading.
  */
-export const hasBlockingConfigErrors = (result: INVALID_CONFIG): boolean =>
-  Boolean(result.repeatedItems?.length);
+export const hasBlockingConfigErrors = (result: INVALID_CONFIG): boolean => Boolean(result.repeatedItems?.length);
 
 export const validateConfig = (config: SidebarConfig, hidden?: string[]): SidebarConfig => {
   const hiddenPanels: string[] = hidden || getHiddenPanels();
   if (!hiddenPanels.length) return cleanConfig(config);
   const configToUpdate = pick(config, [
     PANEL_TYPE.CUSTOM_GROUPS,
+    PANEL_TYPE.BOTTOM_GROUPS,
     PANEL_TYPE.BOTTOM_ITEMS,
     PANEL_TYPE.BOTTOM_GRID_ITEMS,
   ]) as SidebardPanelConfig;
   const updatedPanels = cleanItemsFromConfig(configToUpdate, hiddenPanels);
   let defaultCollapsed = [...(config.default_collapsed || [])];
-  defaultCollapsed = defaultCollapsed.filter((item) => updatedPanels.custom_groups?.[item]);
+  defaultCollapsed = defaultCollapsed.filter(
+    (item) => updatedPanels.custom_groups?.[item]?.length || updatedPanels.bottom_groups?.[item]?.length
+  );
   const validatedConfig: SidebarConfig = {
     ...config,
     ...updatedPanels,
-    ...(defaultCollapsed.length > 0 && { default_collapsed: defaultCollapsed }),
+    default_collapsed: defaultCollapsed,
     ...(hiddenPanels.length > 0 && { hidden_items: hiddenPanels }),
   };
 
@@ -66,13 +68,14 @@ export const validateConfig = (config: SidebarConfig, hidden?: string[]): Sideba
 };
 
 export const getAllConfigItems = (config: SidebarConfig): string[] => {
-  const newItems = Array.from(config.new_items || []).map((item) => item.title!);
+  const newItems = new Set((config.new_items || []).map((item) => item.title));
   return [
     ...Object.values(config.custom_groups || {}).flat(),
+    ...Object.values(config.bottom_groups || {}).flat(),
     ...(config.bottom_items || []),
     ...(config.bottom_grid_items || []),
     ...(config.hidden_items || []),
-  ].filter((item) => !newItems.includes(item));
+  ].filter((item) => !newItems.has(item));
 };
 
 export const findDuplicateItems = (allItems: string[]): string[] => {
@@ -97,7 +100,7 @@ export const isItemsValid = async (
   hass: HaExtened['hass'],
   log: boolean = false
 ): Promise<boolean | INVALID_CONFIG> => {
-  if (getAllConfigItems(config).length === 0) {
+  if (getAllConfigItems(config).length === 0 && !config.new_items?.length) {
     return log ? { valid: true, config } : true;
   }
   const configResult = await isConfigValid(config, hass);
@@ -130,10 +133,11 @@ export const getValidDetails = async (
   const haPanelKeys = Object.keys(hass.panels);
   const defaultPanel = getDefaultPanelUrlPath(hass);
 
-  let allItems = getAllConfigItems(config);
+  const allItems = getAllConfigItems(config);
 
   const flattenedGroups = [
     ...Object.values(config.custom_groups || {}).flat(),
+    ...Object.values(config.bottom_groups || {}).flat(),
     ...(config.bottom_items || []),
     ...(config.bottom_grid_items || []),
   ];
@@ -185,19 +189,32 @@ export const tryCorrectConfig = async (
     return cleanConfig(invalidConfig);
   }
 
-  // Remove invalid items from custom groups, bottom items, bottom grid items and hidden items
+  // Remove invalid items from every panel location, then keep each assignment once.
 
   const updatedPanels = cleanItemsFromAllPanels(invalidConfig, invalidItems);
-  let updatedGroups = updatedPanels.custom_groups || {};
   if (repeatedItems.length > 0) {
-    // clean again to remove duplicates after removing invalid items
-    updatedGroups = cleanItemsFromConfig({ custom_groups: updatedGroups }, repeatedItems).custom_groups || {};
+    const seen = new Set<string>();
+    const keepFirstAssignment = (items: string[]): string[] =>
+      items.filter((item) => {
+        if (seen.has(item)) return false;
+        seen.add(item);
+        return true;
+      });
+    for (const key of [PANEL_TYPE.CUSTOM_GROUPS, PANEL_TYPE.BOTTOM_GROUPS] as const) {
+      if (updatedPanels[key]) {
+        updatedPanels[key] = Object.fromEntries(
+          Object.entries(updatedPanels[key]).map(([group, items]) => [group, keepFirstAssignment(items)])
+        );
+      }
+    }
+    for (const key of [PANEL_TYPE.BOTTOM_ITEMS, PANEL_TYPE.BOTTOM_GRID_ITEMS] as const) {
+      if (updatedPanels[key]) updatedPanels[key] = keepFirstAssignment(updatedPanels[key]);
+    }
   }
 
   const validatedSidebarConfig: SidebarConfig = cleanConfig({
     ...invalidConfig,
     ...updatedPanels,
-    custom_groups: updatedGroups,
   });
 
   console.groupCollapsed('%cVALIDATORS:%c Config correction result', 'color: #4caf50;', 'color: #388e3c;');

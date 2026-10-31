@@ -2,11 +2,11 @@ import type { ProfileConfigInfo } from '../../config/types';
 
 import { CONFIG_NAME, CONFIG_PATH, DEFAULT_CONFIG, STORAGE } from '@constants';
 import { HaExtened, SidebarConfig } from '@types';
-import YAML from 'yaml';
 
 import { HomeAssistantConfigProvider } from '../../config/providers/ha-config-provider';
 import { HomeAssistantProfileProvider } from '../../config/providers/ha-profile-provider';
 import { resolvePreferredConfigSource } from '../../config/source';
+import { parseSidebarYamlConfig } from '../../config/validation';
 import {
   getConfigSource,
   getStorage,
@@ -41,10 +41,10 @@ export const fetchFileConfig = async (): Promise<SidebarConfig | undefined> => {
   const randomUrl = `${CONFIG_PATH}?hash=${randomId()}`;
   try {
     const response = await fetch(randomUrl, { cache: 'no-store' });
-    const yamlStr = await response.text();
-    const data = YAML.parse(yamlStr);
-    // console.log('data', data);
-    return data;
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const parsed = parseSidebarYamlConfig(await response.text());
+    if (!parsed.valid) throw new Error(parsed.errors.join(' '));
+    return parsed.config;
   } catch (e) {
     console.error(`${errorNotFound}`, e);
     return undefined;
@@ -66,6 +66,7 @@ export const fetchConfig = async (
         : source === 'static_yaml'
           ? await fetchFileConfig()
           : getStorageConfig();
+  if (!config && source === 'static_yaml') return DEFAULT_CONFIG;
   if (config) {
     config = { ...config };
     // console.log('Added with init config defaults', config);
@@ -128,7 +129,6 @@ export const fetchConfig = async (
 export const fetchHaProfileConfig = async (hass: HaExtened['hass']): Promise<SidebarConfig | undefined> => {
   const result = await new HomeAssistantProfileProvider(hass).read();
   if (result.valid && result.config) {
-    setStorage(getHaConfigCacheKey('home_assistant_profile', hass.user?.id), result.config);
     if (result.revision) setStorage(STORAGE.HA_CONFIG_REVISION, result.revision);
     if (result.last_modified != null) {
       setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, result.last_modified);
@@ -146,7 +146,6 @@ export const fetchHaConfig = async (hass: HaExtened['hass']): Promise<SidebarCon
   const provider = new HomeAssistantConfigProvider(hass);
   const result = await provider.read();
   if (result.valid && result.config) {
-    setStorage(getHaConfigCacheKey('home_assistant_config', hass.user?.id), result.config);
     if (result.last_modified != null) {
       setStorage(STORAGE.HA_CONFIG_LAST_MODIFIED, result.last_modified);
     }

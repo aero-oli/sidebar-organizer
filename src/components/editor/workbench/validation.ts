@@ -27,7 +27,7 @@ export const validateStructuredConfig = (config: SidebarConfig): ValidationIssue
       route: ROUTES[String(path[0])] || 'appearance',
     };
   });
-  issues.push(...validateDuplicateAssignments(config));
+  if (issues.length === 0) issues.push(...validateDuplicateAssignments(config));
   return issues;
 };
 

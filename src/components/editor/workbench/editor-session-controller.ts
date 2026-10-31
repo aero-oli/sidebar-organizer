@@ -104,12 +104,12 @@ export class EditorSessionController {
     this.document = YamlConfigDocument.parse(rawYaml);
     this.revalidate();
     const parsed = this.document.toConfig();
-    if (parsed) this.config = parsed;
+    if (parsed && this.yamlValid) this.config = parsed;
     this.changed();
   }
 
   public setConfig(config: SidebarConfig): void {
-    if (!this.document.valid) {
+    if (!this.yamlValid) {
       // Keep invalid source exactly as typed. Visual controls intentionally edit
       // the last valid snapshot only after the user repairs the YAML.
       return;
@@ -187,6 +187,7 @@ export class EditorSessionController {
         }))
       );
     }
+    if (this.issues.some((issue) => issue.code === 'schema.invalid_value')) this.yamlValid = false;
   }
 
   private changed(): void {
