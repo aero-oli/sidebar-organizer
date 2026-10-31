@@ -1,1 +1,1 @@
-console.info("Customize the sidebar in Home Assistant"),console.info("Github: https://github.com/aero-oli/sidebar-organizer"),console.info("If you like the plugin, consider supporting the developer: https://github.com/sponsors/ngocjohn");import"./index-DhqPiDNu.js";
+console.info("Customize the sidebar in Home Assistant"),console.info("Github: https://github.com/aero-oli/sidebar-organizer"),console.info("If you like the plugin, consider supporting the developer: https://github.com/sponsors/ngocjohn");import"./index-DOLBdgyx.js";

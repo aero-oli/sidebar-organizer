@@ -1,3 +1,9 @@
+## [4.8.7](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.6...v4.8.7) (2026-10-31)
+
+### Improvements
+
+* Integrate sidebar organization and appearance editing ([2091453](https://github.com/aero-oli/sidebar-organizer/commit/209145308eed9db64a9af4c2b584f519dd790cd0))
+
 ## [4.8.6](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.5...v4.8.6) (2026-10-31)
 
 ### Bug Fixes
