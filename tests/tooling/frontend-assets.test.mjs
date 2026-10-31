@@ -17,7 +17,7 @@ const manifest = () => ({
   entry: 'sidebar-organizer.js',
   chunks: {
     'sidebar-organizer.js': { imports: [], dynamicImports: ['runtime-123.js'], bytes: 10, editor: false },
-    'runtime-123.js': { imports: ['shared-123.js'], dynamicImports: ['editor-123.js'], bytes: 20, editor: false },
+    'runtime-123.js': { imports: ['shared-123.js'], dynamicImports: ['editor-123.js'], bytes: 20, editor: false, runtime: true },
     'shared-123.js': { imports: [], dynamicImports: [], bytes: 30, editor: false },
     'editor-123.js': { imports: ['shared-123.js'], dynamicImports: [], bytes: 100, editor: true },
   },
@@ -81,4 +81,18 @@ test('startup includes immediate runtime and shared dependencies but excludes ed
   const eager = manifest();
   eager.chunks['runtime-123.js'].imports.push('editor-123.js');
   assert.throws(() => inspectFrontendLoading(eager), /startup dependency graph/);
+});
+
+test('a strict facade still counts the runtime dynamically loaded by its hashed bootstrap', () => {
+  const assets = manifest();
+  assets.chunks[assets.entry].imports = ['shared-123.js'];
+  assets.chunks[assets.entry].dynamicImports = [];
+  assets.chunks['shared-123.js'].dynamicImports = ['runtime-123.js'];
+  assert.deepEqual(inspectFrontendLoading(assets), { entryBytes: 10, startupBytes: 60, lazyBytes: 100 });
+});
+
+test('hashed modules cannot import a cached unversioned stable entry', () => {
+  const assets = manifest();
+  assets.chunks['runtime-123.js'].imports.push(assets.entry);
+  assert.throws(() => inspectFrontendLoading(assets), /unversioned stable entry/);
 });

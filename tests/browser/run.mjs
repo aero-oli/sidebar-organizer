@@ -86,7 +86,7 @@ try {
           addEventListener('unhandledrejection', event => { result.errors.push(String(event.reason)); show(); });
           try {
             window.SidebarOrganizer = {};
-            await import('/assets/sidebar-organizer.js');
+            await import('/assets/sidebar-organizer.js?v=fixture-current');
             for (let attempt = 0; attempt < 100 && !customElements.get('so-group-divider'); attempt++) {
               await new Promise(resolve => setTimeout(resolve, 10));
             }
@@ -102,7 +102,13 @@ try {
         </script></body></html>`);
       } else if (url.pathname.startsWith('/assets/')) {
         res.setHeader('Content-Type', 'text/javascript');
-        res.end(await readFile(path.join(root, 'custom_components/sidebar_organizer/frontend', path.basename(url.pathname))));
+        if (url.pathname === '/assets/sidebar-organizer.js' && !url.search) {
+          // Simulate a previously cached entry whose exports belong to an old
+          // build. Current hashed modules must never depend on this URL.
+          res.end('throw new Error("Unversioned cached entry was loaded");');
+        } else {
+          res.end(await readFile(path.join(root, 'custom_components/sidebar_organizer/frontend', path.basename(url.pathname))));
+        }
       } else {
         res.setHeader('Content-Type', 'text/javascript');
         res.end(await readFile(path.join(temp, path.basename(url.pathname))));

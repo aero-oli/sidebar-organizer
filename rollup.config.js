@@ -40,6 +40,7 @@ const plugins = [dev && serve(serveopts), !dev && terser(terserOpt)];
 export default [
   {
     input: 'src/index.ts',
+    preserveEntrySignatures: 'strict',
     output: [
       {
         dir: outputDirectory,

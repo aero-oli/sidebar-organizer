@@ -59,6 +59,12 @@ export const compareFrontendAssets = (source, target) => {
 };
 
 export const inspectFrontendLoading = (manifest) => {
+  const chunks = Object.entries(manifest.chunks);
+  for (const [name, chunk] of chunks) {
+    if (name !== manifest.entry && [...chunk.imports, ...chunk.dynamicImports].includes(manifest.entry)) {
+      throw new Error(`Frontend chunk depends on the unversioned stable entry: ${name}`);
+    }
+  }
   const startup = new Set();
   const visit = (name) => {
     if (startup.has(name)) return;
@@ -66,10 +72,13 @@ export const inspectFrontendLoading = (manifest) => {
     for (const imported of manifest.chunks[name].imports) visit(imported);
   };
   visit(manifest.entry);
-  // The entry imports the guarded runtime immediately; later runtime imports
-  // are editor dialogs and must stay outside this initial dependency graph.
+  // A strict entry can be a facade over a hashed bootstrap chunk. The runtime
+  // remains immediate even when its import lives in that bootstrap, while its
+  // dialog imports stay deferred.
   for (const name of manifest.chunks[manifest.entry].dynamicImports) visit(name);
-  const chunks = Object.entries(manifest.chunks);
+  const runtimeChunks = chunks.filter(([, chunk]) => chunk.runtime);
+  if (!runtimeChunks.length) throw new Error('Missing startup runtime bundle.');
+  for (const [name] of runtimeChunks) visit(name);
   if (!chunks.some(([, chunk]) => chunk.editor)) throw new Error('Missing lazy editor bundle.');
   if ([...startup].some((name) => manifest.chunks[name].editor)) {
     throw new Error('Editor modules are included in the startup dependency graph.');

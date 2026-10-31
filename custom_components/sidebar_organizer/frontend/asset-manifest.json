@@ -2,52 +2,66 @@
   "entry": "sidebar-organizer.js",
   "chunks": {
     "sidebar-organizer.js": {
+      "imports": [
+        "index-DsB6EJBt.js"
+      ],
+      "dynamicImports": [],
+      "bytes": 267,
+      "editor": false,
+      "runtime": false
+    },
+    "index-DsB6EJBt.js": {
       "imports": [],
       "dynamicImports": [
-        "sidebar-organizer-BczFKCT5.js"
+        "sidebar-organizer-DJyQmX37.js"
       ],
-      "bytes": 12094,
-      "editor": false
+      "bytes": 11856,
+      "editor": false,
+      "runtime": false
     },
-    "sidebar-organizer-BczFKCT5.js": {
+    "sidebar-organizer-DJyQmX37.js": {
       "imports": [
-        "sidebar-organizer.js"
+        "index-DsB6EJBt.js"
       ],
       "dynamicImports": [
-        "sidebar-organizer-dialog-BhmiRZ4a.js",
-        "sidebar-organizer-dialog_wa-CP_tnuEa.js"
+        "sidebar-organizer-dialog-CSSQQKoF.js",
+        "sidebar-organizer-dialog_wa-BHlMB2Ug.js"
       ],
-      "bytes": 265459,
-      "editor": false
+      "bytes": 265456,
+      "editor": false,
+      "runtime": true
     },
-    "sidebar-organizer-dialog-BhmiRZ4a.js": {
+    "sidebar-organizer-dialog-CSSQQKoF.js": {
       "imports": [
-        "sidebar-organizer-BczFKCT5.js",
-        "sidebar-organizer.js",
-        "sidebar-dialog-DCyaQWlL.js"
+        "sidebar-organizer-DJyQmX37.js",
+        "index-DsB6EJBt.js",
+        "sidebar-dialog-cMF5HsWs.js"
       ],
       "dynamicImports": [],
-      "bytes": 6086,
-      "editor": false
+      "bytes": 6083,
+      "editor": false,
+      "runtime": false
     },
-    "sidebar-organizer-dialog_wa-CP_tnuEa.js": {
+    "sidebar-organizer-dialog_wa-BHlMB2Ug.js": {
       "imports": [
-        "sidebar-organizer-BczFKCT5.js",
-        "sidebar-organizer.js",
-        "sidebar-dialog-DCyaQWlL.js"
+        "sidebar-organizer-DJyQmX37.js",
+        "index-DsB6EJBt.js",
+        "sidebar-dialog-cMF5HsWs.js"
       ],
       "dynamicImports": [],
-      "bytes": 7626,
-      "editor": false
+      "bytes": 7628,
+      "editor": false,
+      "runtime": false
     },
-    "sidebar-dialog-DCyaQWlL.js": {
+    "sidebar-dialog-cMF5HsWs.js": {
       "imports": [
-        "sidebar-organizer-BczFKCT5.js",
-        "sidebar-organizer.js"
+        "sidebar-organizer-DJyQmX37.js",
+        "index-DsB6EJBt.js"
       ],
       "dynamicImports": [],
-      "bytes": 619470,
-      "editor": true
+      "bytes": 619467,
+      "editor": true,
+      "runtime": false
     }
   }
 }

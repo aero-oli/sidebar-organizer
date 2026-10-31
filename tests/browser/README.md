@@ -7,6 +7,8 @@ node tests/browser/run.mjs
 After `pnpm run build`, add `--production` to verify the shipped entry and chunks
 in a fresh page. It checks that the runtime loads, editor code is absent from
 startup, and importing the lazy dialog registers the editor and CodeMirror.
+The versioned-entry fixture serves an incompatible old response at the bare
+entry URL to catch accidental dependencies on an older cached entry.
 
 On macOS the runner uses the installed Google Chrome application. Set `CHROME_BIN`
 to a Chrome/Chromium executable on other systems. Browser launch may require the

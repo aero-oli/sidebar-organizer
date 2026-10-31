@@ -18,6 +18,7 @@ export const frontendBundlePlugin = (directory) => ({
             editor: Object.keys(chunk.modules).some((id) =>
               /\/src\/components\/(editor\/|sidebar-dialog)|\/(@codemirror|codemirror)\//.test(id)
             ),
+            runtime: Object.keys(chunk.modules).some((id) => id.endsWith('/src/sidebar-organizer.ts')),
           },
         ])
     );
