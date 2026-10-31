@@ -1,0 +1,53 @@
+{
+  "entry": "sidebar-organizer.js",
+  "chunks": {
+    "sidebar-organizer.js": {
+      "imports": [],
+      "dynamicImports": [
+        "sidebar-organizer-BczFKCT5.js"
+      ],
+      "bytes": 12094,
+      "editor": false
+    },
+    "sidebar-organizer-BczFKCT5.js": {
+      "imports": [
+        "sidebar-organizer.js"
+      ],
+      "dynamicImports": [
+        "sidebar-organizer-dialog-BhmiRZ4a.js",
+        "sidebar-organizer-dialog_wa-CP_tnuEa.js"
+      ],
+      "bytes": 265459,
+      "editor": false
+    },
+    "sidebar-organizer-dialog-BhmiRZ4a.js": {
+      "imports": [
+        "sidebar-organizer-BczFKCT5.js",
+        "sidebar-organizer.js",
+        "sidebar-dialog-DCyaQWlL.js"
+      ],
+      "dynamicImports": [],
+      "bytes": 6086,
+      "editor": false
+    },
+    "sidebar-organizer-dialog_wa-CP_tnuEa.js": {
+      "imports": [
+        "sidebar-organizer-BczFKCT5.js",
+        "sidebar-organizer.js",
+        "sidebar-dialog-DCyaQWlL.js"
+      ],
+      "dynamicImports": [],
+      "bytes": 7626,
+      "editor": false
+    },
+    "sidebar-dialog-DCyaQWlL.js": {
+      "imports": [
+        "sidebar-organizer-BczFKCT5.js",
+        "sidebar-organizer.js"
+      ],
+      "dynamicImports": [],
+      "bytes": 619470,
+      "editor": true
+    }
+  }
+}

@@ -4,6 +4,7 @@ import terser from '@rollup/plugin-terser';
 import replace from '@rollup/plugin-replace';
 import { version } from './package.json';
 import { logCardInfo, defaultPlugins } from './rollup.config.helper.mjs';
+import { frontendBundlePlugin } from './scripts/frontend_bundle_plugin.mjs';
 
 const dev = process.env.ROLLUP_WATCH;
 const port = process.env.PORT || 8235;
@@ -11,7 +12,7 @@ const debug = process.env.DEBUG || dev;
 
 const currentVersion = dev ? 'DEVELOPMENT' : `v${version}`;
 const custombanner = logCardInfo(currentVersion);
-const fileOutput = dev ? 'dist/sidebar-organizer.js' : 'build/sidebar-organizer.js';
+const outputDirectory = dev ? 'dist' : 'build';
 
 const serveopts = {
   contentBase: ['./dist'],
@@ -41,11 +42,13 @@ export default [
     input: 'src/index.ts',
     output: [
       {
-        file: fileOutput,
+        dir: outputDirectory,
+        entryFileNames: 'sidebar-organizer.js',
+        chunkFileNames: '[name]-[hash].js',
         format: 'es',
+        inlineDynamicImports: Boolean(dev),
         sourcemap: dev ? true : false,
-        inlineDynamicImports: true,
-        banner: custombanner,
+        banner: (chunk) => (chunk.isEntry ? custombanner : undefined),
         sourcemapIgnoreList: (relativeSourcePath, sourcemapPath) => {
           // will ignore-list all files with node_modules in their paths
           return relativeSourcePath.includes('node_modules');
@@ -53,6 +56,7 @@ export default [
       },
     ],
     plugins: [
+      !dev && frontendBundlePlugin(outputDirectory),
       replace(replaceOpts),
       typescript({
         tsconfig: './tsconfig.json',

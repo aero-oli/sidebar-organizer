@@ -1,4 +1,5 @@
 /node_modules/
+__pycache__/
 /.rpt2_cache/
 /dev
 dist/
@@ -8,4 +9,3 @@ build/
 .DS_Store
 package-lock.json
 test/
-scripts/

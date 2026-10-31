@@ -39,7 +39,7 @@ jobs:
           version: 0.15.17
           args: check custom_components/sidebar_organizer tests/backend
       - name: Check clean generated bundle
-        run: git diff --exit-code custom_components/sidebar_organizer/frontend/sidebar-organizer.js
+        run: test -z "$(git status --porcelain -- custom_components/sidebar_organizer/frontend)"
       - name: Release
         run: npx semantic-release
         env:

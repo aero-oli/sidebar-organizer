@@ -35,14 +35,14 @@ export default {
           'package.json',
           'custom_components/sidebar_organizer/manifest.json',
           'custom_components/sidebar_organizer/const.py',
-          'custom_components/sidebar_organizer/frontend/sidebar-organizer.js',
+          'custom_components/sidebar_organizer/frontend/**',
         ],
       },
     ],
     [
       '@semantic-release/github',
       {
-        assets: 'build/*.js',
+        assets: ['build/*.js', 'build/asset-manifest.json'],
         failComment: false,
         releasedLabels: false,
         successComment: false,
