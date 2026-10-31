@@ -31,7 +31,7 @@ A generation token prevents an older asynchronous run from committing after a ne
 
 ## Editor lifecycle
 
-The editor tracks a baseline config, raw YAML, source revision, validation result, and the selected target. Dirty state uses a canonical config fingerprint plus raw-YAML comparison, so key reordering is ignored while comment-only YAML edits remain saveable. Server YAML is handled identically for shared and personal profiles. External changes auto-reload a clean editor and require a decision when local edits exist. Profile selection and subscriptions are generation-owned, saves are single-flight, imports preserve the exact YAML payload, and adjacent backups can be restored from the dialog.
+The editor tracks a published baseline, raw YAML, source revision, validation result, and the selected target. Raw YAML changes, including comments, remain saveable. Malformed field types retain the previous safe visual configuration while the exact YAML draft remains recoverable. Server YAML is handled identically for shared and personal profiles. External changes auto-reload a clean editor and require a decision when local edits exist. Profile selection and subscriptions are generation-owned, and saves are single-flight. Each save publishes an immutable snapshot; edits made during the request stay dirty and recoverable against the returned revision. Imports preserve the exact YAML payload, and adjacent backups can be restored from the dialog. One preview instance moves between the desktop column and the modal drawer; closed drawers are hidden and inert.
 
 ## Compatibility and migration
 
@@ -41,5 +41,6 @@ The UI presents the shared default, the signed-in user's sidebar, and—only for
 
 - Frontend and backend schema fixtures must agree.
 - The package, integration manifest, backend frontend version, built bundle, and checked-in integration bundle must match.
+- The stable frontend entry and every referenced chunk are copied, checked, and released together. The runtime loads at startup; editor and CodeMirror code loads when the dialog is opened.
 - CI installs the frozen lockfile and runs frontend tests, backend tests, lint, bundle generation, Python compilation, and bundle/version checks.
 - Production bundles retain warnings and errors needed for support diagnostics.

@@ -121,6 +121,10 @@ When YAML setup is used, later changes to this block are reconciled into the exi
 3. Restart Home Assistant.
 4. Go to Settings -> Devices & services -> Add integration -> Sidebar Organizer.
 
+Include every file in the integration's `frontend` directory. The frontend entry
+loads its runtime and editor modules from the same directory, and all generated
+files belong to the same release.
+
 </details>
 
 ### Migrating from a legacy frontend install
