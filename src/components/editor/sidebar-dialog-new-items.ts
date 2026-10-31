@@ -2,7 +2,7 @@ import { mdiChevronLeft, mdiEmoticonExcited, mdiGestureTap } from '@mdi/js';
 import { SidebarConfig, NewItemConfig } from '@types';
 import { TRANSLATED_LABEL } from '@utilities/localize';
 import { safeCustomElement } from '@utilities/safe-custom-element';
-import { showConfirmDialog, showPromptDialog } from '@utilities/show-dialog-box';
+import { showAlertDialog, showConfirmDialog, showPromptDialog } from '@utilities/show-dialog-box';
 import { BaseEditor } from 'components/base-editor';
 import { BOTTOM_SECTION, CONFIG_SECTION } from 'constants/config-area';
 import { capitalize, pick } from 'es-toolkit/compat';
@@ -25,6 +25,16 @@ export class SidebarDialogNewItems extends BaseEditor {
   }
   @property({ attribute: false }) _sidebarConfig!: SidebarConfig;
 
+  @property({ type: Boolean }) embedded = false;
+  @property({ attribute: false }) itemTitle?: string;
+
+  protected willUpdate(changed: PropertyValues): void {
+    if (this.embedded && (changed.has('itemTitle') || changed.has('_sidebarConfig'))) {
+      const index = this._sidebarConfig?.new_items?.findIndex((item) => item.title === this.itemTitle) ?? -1;
+      this._selectedItemIndex = index >= 0 ? index : null;
+    }
+  }
+
   @state() _selectedItemIndex: number | null = null;
   @state() _selectedItem: NewItemConfig | null = null;
   @state() _yamlMode: boolean = false;
@@ -38,7 +48,7 @@ export class SidebarDialogNewItems extends BaseEditor {
     if (changedProperties.has('_selectedItemIndex')) {
       if (this._selectedItemIndex !== null) {
         this._selectedItem = this._sidebarConfig.new_items![this._selectedItemIndex];
-        this._toggleItemInPreview(this._selectedItem.title!);
+        if (!this.embedded) this._toggleItemInPreview(this._selectedItem.title!);
       } else {
         this._selectedItem = null;
         this._yamlMode = false;
@@ -139,13 +149,13 @@ export class SidebarDialogNewItems extends BaseEditor {
                   const { icon, title } = item;
                   return html`
                     <div class="group-item-row" style="padding-inline-start: 1rem">
-                      <div class="group-name" @click=${() => (this._selectedItemIndex = index)}>
+                      <button class="group-name" @click=${() => (this._selectedItemIndex = index)}>
                         <ha-icon .icon=${icon}></ha-icon>
                         <div class="group-name-items">
                           ${title}
                           <span>${convertTitle(this.getGroupKey(title!))}</span>
                         </div>
-                      </div>
+                      </button>
                       <div class="group-actions">
                         <ha-icon-button .label=${'Edit item'} @click=${() => (this._selectedItemIndex = index)}>
                           <ha-icon icon="mdi:pencil"></ha-icon
@@ -175,7 +185,12 @@ export class SidebarDialogNewItems extends BaseEditor {
     const BTN_LABEL = TRANSLATED_LABEL.BTN_LABEL;
     const newItems = this._sidebarConfig.new_items![this._selectedItemIndex!];
     const headerBack = html` <div class="header-row">
-      <ha-icon-button .path=${mdiChevronLeft} @click=${() => (this._selectedItemIndex = null)}> </ha-icon-button>
+      <ha-icon-button
+        .label=${'Back to items'}
+        .path=${mdiChevronLeft}
+        @click=${() => (this._selectedItemIndex = null)}
+      >
+      </ha-icon-button>
     </div>`;
 
     const baseData = { ...newItems };
@@ -200,18 +215,15 @@ export class SidebarDialogNewItems extends BaseEditor {
     const iconTemplateSchema = this._iconTemplateSchema;
 
     return html`
-      ${headerBack}
+      ${this.embedded ? nothing : headerBack}
       <div class="config-content">
         ${!this._yamlMode
           ? html`
-              <div class="group-item-row item-name-row">
-                <div class="group-name">
+              <div class="group-item-row item-name-row" ?embedded=${this.embedded}>
+                ${!this.embedded ? html`<div class="group-name">
                   <ha-icon .icon=${newItems.icon}></ha-icon>
-                  <div class="group-name-items">
-                    ${newItems.title}
-                    <span>${groupName}</span>
-                  </div>
-                </div>
+                  <div class="group-name-items">${newItems.title}<span>${groupName}</span></div>
+                </div>` : nothing}
                 <div class="group-actions">
                   <ha-button
                     appearance="plain"
@@ -219,6 +231,14 @@ export class SidebarDialogNewItems extends BaseEditor {
                     @click=${this._toggleRenameItem.bind(this, this._selectedItemIndex!)}
                     >Rename</ha-button
                   >
+                  ${this.embedded
+                    ? html`<ha-button
+                        appearance="plain"
+                        destructive
+                        @click=${() => this._handleDeleteItem(this._selectedItemIndex!)}
+                        >Delete item</ha-button
+                      >`
+                    : nothing}
                 </div>
               </div>
 
@@ -365,6 +385,8 @@ export class SidebarDialogNewItems extends BaseEditor {
     };
 
     this._handleRemoveItem(title!);
+    this._selectedItemIndex = null;
+    this.dispatchEvent(new CustomEvent('item-deleted', { bubbles: true, composed: true }));
 
     this._dispatchConfig(this._sidebarConfig);
     this.requestUpdate();
@@ -377,8 +399,25 @@ export class SidebarDialogNewItems extends BaseEditor {
   private _updateItemAssignments(title: string, replacement?: string): void {
     const replace = (items: string[]) =>
       items.flatMap((item) => (item === title ? (replacement ? [replacement] : []) : [item]));
+    const remap = (record: Record<string, string> | undefined) => {
+      if (!record || !Object.hasOwn(record, title)) return record;
+      const result = { ...record };
+      if (replacement) result[replacement] = result[title];
+      delete result[title];
+      return result;
+    };
     this._sidebarConfig = {
       ...this._sidebarConfig,
+      ...(this._sidebarConfig.hidden_items ? { hidden_items: replace(this._sidebarConfig.hidden_items) } : {}),
+      ...(this._sidebarConfig.notification ? { notification: remap(this._sidebarConfig.notification) } : {}),
+      ...(this._sidebarConfig.visibility_templates?.items
+        ? {
+            visibility_templates: {
+              ...this._sidebarConfig.visibility_templates,
+              items: remap(this._sidebarConfig.visibility_templates.items),
+            },
+          }
+        : {}),
       ...(this._sidebarConfig.custom_groups
         ? {
             custom_groups: Object.fromEntries(
@@ -405,9 +444,10 @@ export class SidebarDialogNewItems extends BaseEditor {
     let newItemTitle = await showPromptDialog(this, 'Enter new item title', 'Rename Item', 'Rename', 'Cancel');
     if (!newItemTitle || newItemTitle === '') return;
     newItemTitle = newItemTitle.trim();
+    if (!newItemTitle || newItemTitle === currentTitle) return;
 
-    if (this._sidebarConfig.new_items?.some((item) => item.title === newItemTitle)) {
-      await showConfirmDialog(this, `Item with this name already exists. Do you want to edit it?`, 'Edit', 'Cancel');
+    if (Object.hasOwn(this.hass.panels || {}, newItemTitle) || this._sidebarConfig.new_items?.some((item) => item.title === newItemTitle)) {
+      await showAlertDialog(this, 'An item with this name already exists. Choose a different name.');
       return;
     }
 
@@ -424,6 +464,9 @@ export class SidebarDialogNewItems extends BaseEditor {
     };
     this._dispatchConfig(this._sidebarConfig);
     this._selectedItemIndex = index;
+    this.dispatchEvent(
+      new CustomEvent('item-renamed', { detail: { title: newItemTitle }, bubbles: true, composed: true })
+    );
     this.requestUpdate();
   };
 
@@ -431,8 +474,9 @@ export class SidebarDialogNewItems extends BaseEditor {
     let newItemTitle = await showPromptDialog(this, 'Enter new item title', 'New Item', 'Add', 'Cancel');
     if (!newItemTitle || newItemTitle === '') return;
     newItemTitle = newItemTitle.trim();
-    if (this._sidebarConfig.new_items?.some((item) => item.title === newItemTitle)) {
-      await showConfirmDialog(this, `Item with this name already exists. Do you want to edit it?`, 'Edit', 'Cancel');
+    if (!newItemTitle) return;
+    if (Object.hasOwn(this.hass.panels || {}, newItemTitle) || this._sidebarConfig.new_items?.some((item) => item.title === newItemTitle)) {
+      await showAlertDialog(this, 'An item with this name already exists. Choose a different name.');
       return;
     }
     const newItemConfig = {
@@ -460,10 +504,23 @@ export class SidebarDialogNewItems extends BaseEditor {
     return [
       super.styles,
       css`
+        button.group-name {
+          background: transparent;
+          border: 0;
+          color: var(--primary-text-color);
+          cursor: pointer;
+          font: inherit;
+          text-align: start;
+        }
+        button:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
         .config-content {
           margin-top: 0;
           min-height: 0;
         }
+        .item-name-row[embedded] { background: transparent; border: 0; padding-inline: 0; justify-content: flex-end; }
         .item-name-row {
           padding: 0.5em;
           border: 1px solid var(--divider-color);

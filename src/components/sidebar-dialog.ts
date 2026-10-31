@@ -39,6 +39,7 @@ import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, css, TemplateResult, PropertyValues, CSSResultGroup, nothing } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { ifDefined } from 'lit/directives/if-defined.js';
+import { live } from 'lit/directives/live.js';
 import { styleMap } from 'lit/directives/style-map.js';
 
 import './editor';
@@ -121,10 +122,11 @@ export class SidebarConfigDialog extends BaseEditor {
   @state() private _lastLoadedHaConfigModified?: number;
   @state() private _rawYaml = '';
   @state() public _narrow = false;
-  @state() private _workbenchRoute: WorkbenchRoute = 'sidebar';
+  @state() private _workbenchRoute: WorkbenchRoute = 'organize';
   @state() private _previewOpen = false;
   @state() private _desktopPreview = false;
   private _previewMedia?: MediaQueryList;
+  private _routeScroll = new Map<WorkbenchRoute, number>();
   private _previewMediaChanged = (event: MediaQueryListEvent): void => {
     this._desktopPreview = event.matches;
     if (event.matches) this._previewOpen = false;
@@ -159,7 +161,7 @@ export class SidebarConfigDialog extends BaseEditor {
   connectedCallback(): void {
     super.connectedCallback();
     this._connected = true;
-    this._previewMedia = window.matchMedia('(min-width: 1500px)');
+    this._previewMedia = window.matchMedia('(min-width: 1100px)');
     this._desktopPreview = this._previewMedia.matches;
     this._previewMedia.addEventListener('change', this._previewMediaChanged);
     setActiveStorageUser(this.hass.user?.id);
@@ -514,80 +516,108 @@ export class SidebarConfigDialog extends BaseEditor {
     const session = this._session!;
     const issueCount = session.issues.filter((issue) => issue.severity === 'error').length;
     const targetName = this._activeTargetName();
-    const routeDetails: Record<(typeof WORKBENCH_NAV_ROUTES)[number], {
-      route: WorkbenchRoute;
-      label: string;
-      description: string;
-      icon: string;
-    }> = {
-      sidebar: { route: 'sidebar', label: 'Profile', description: 'Profiles and sync', icon: 'mdi:account-cog-outline' },
-      items: { route: 'items', label: 'Items', description: 'Hide, add and configure', icon: 'mdi:view-list-outline' },
-      organize: { route: 'organize', label: 'Layout', description: 'Groups and order', icon: 'mdi:format-list-group' },
-      appearance: { route: 'appearance', label: 'Appearance', description: 'Look and behaviour', icon: 'mdi:palette-outline' },
-      yaml: { route: 'yaml', label: 'YAML', description: 'Raw configuration', icon: 'mdi:code-braces' },
-    };
+    const routeDetails = {
+      organize: { route: 'organize', label: 'Organize', icon: 'mdi:format-list-group' },
+      appearance: { route: 'appearance', label: 'Appearance', icon: 'mdi:palette-outline' },
+    } as const;
     const routes = WORKBENCH_NAV_ROUTES.map((route) => routeDetails[route]);
 
     return html`
       <div class="workbench">
         <header class="workbench-header" ?inert=${this._previewOpen && !this._desktopPreview}>
-          <button class="target-control" @click=${() => this._goToRoute('sidebar')}>
-            <ha-icon icon="mdi:account-circle-outline"></ha-icon>
-            <span><small>Configuration</small><strong>${targetName}</strong></span>
-            <span class="change-target">Change</span>
-          </button>
-          <div class="header-status" aria-live="polite">
-            <span class="status-chip" data-state=${session.dirty ? 'draft' : 'saved'}>
-              ${session.dirty ? 'Draft autosaves locally' : 'Up to date'}
-            </span>
-            <span class="status-chip" data-state=${issueCount ? 'error' : 'valid'}>
-              ${issueCount ? `${issueCount} issue${issueCount === 1 ? '' : 's'}` : 'Valid'}
-            </span>
-          </div>
+          <label class="target-picker">
+            <span>Editing sidebar</span>
+            <select
+              aria-label="Sidebar to edit"
+              .value=${live(isHomeAssistantConfigSource(this._configSource) ? this._selectedProfile : this._configSource)}
+              ?disabled=${this._saving || !isHomeAssistantConfigSource(this._configSource)}
+              @change=${(event: Event) =>
+                this._handleProfileSelected(
+                  new CustomEvent('profile-selected', { detail: { value: (event.target as HTMLSelectElement).value } })
+                )}
+            >
+              ${isHomeAssistantConfigSource(this._configSource)
+                ? html`<option value="shared" ?selected=${this._selectedProfile === 'shared'}>Shared sidebar</option>
+                    ${this._profileUsers
+                      .filter(
+                        (user) =>
+                          (user.is_active && !user.system_generated) ||
+                          (this.hass.user?.is_admin && user.profile_exists)
+                      )
+                      .map(
+                        (user) =>
+                          html`<option value=${user.id} ?selected=${this._selectedProfile === user.id}>
+                            ${user.name}${user.id === this.hass.user?.id ? ' (you)' : ''}
+                          </option>`
+                      )}`
+                : html`<option value=${this._configSource} selected>${targetName}</option>`}
+            </select>
+          </label>
+          <p class="target-audience">${this._targetAudience()}</p>
+          ${issueCount
+            ? html`<button class="issues-link" @click=${() => this._goToRoute('review')}>
+                ${issueCount} issue${issueCount === 1 ? '' : 's'}
+              </button>`
+            : nothing}
           <ha-button appearance="plain" class="preview-toggle" @click=${this._openPreview}>
             <ha-icon slot="start" icon="mdi:eye-outline"></ha-icon>Preview
           </ha-button>
         </header>
 
+        <nav class="workspace-nav" aria-label="Sidebar settings" ?inert=${this._previewOpen && !this._desktopPreview}>
+          ${routes.map(
+            ({ route, label, icon }) =>
+              html`<button
+                class="task-link"
+                data-active=${route === this._workbenchRoute ||
+                (route === 'organize' && this._workbenchRoute === 'items')}
+                aria-current=${ifDefined(route === this._workbenchRoute ? 'page' : undefined)}
+                @click=${() => this._goToRoute(route)}
+              >
+                <ha-icon icon=${icon}></ha-icon>${label}
+                ${session.issues.some(
+                  (issue) => issue.route === route || (route === 'organize' && issue.route === 'items')
+                )
+                  ? html`<ha-icon class="stage-error" icon="mdi:alert-circle"></ha-icon>`
+                  : nothing}
+              </button>`
+          )}
+          <ha-dropdown
+            class="advanced-menu"
+            @wa-select=${(event: CustomEvent) => {
+              const route = event.detail.item?.value;
+              if (route === 'yaml' || route === 'sidebar') this._goToRoute(route);
+            }}
+          >
+            <ha-button slot="trigger" appearance="plain" with-caret>Advanced</ha-button>
+            <ha-dropdown-item value="yaml">YAML editor</ha-dropdown-item>
+            <ha-dropdown-item value="sidebar">Profiles, sync and maintenance</ha-dropdown-item>
+          </ha-dropdown>
+        </nav>
         <div class="workbench-notice" ?inert=${this._previewOpen && !this._desktopPreview}>
           ${this._draftOffer ? this._renderDraftRecovery(this._draftOffer) : nothing}
         </div>
-
         <div class="workbench-body">
-          <nav class="task-rail" aria-label="Settings categories" ?inert=${this._previewOpen && !this._desktopPreview}>
-            ${routes.map(
-              ({ route, label, description, icon }) => html`
-                <button
-                  class="task-link"
-                  data-active=${route === this._workbenchRoute}
-                  @click=${() => this._goToRoute(route)}
-                >
-                  <ha-icon icon=${icon}></ha-icon>
-                  <span><strong>${label}</strong><small>${description}</small></span>
-                  ${session.issues.some((issue) => issue.route === route && issue.severity === 'error')
-                    ? html`<ha-icon class="stage-error" icon="mdi:alert-circle"></ha-icon>`
-                    : nothing}
-                </button>
-              `
-            )}
-          </nav>
-
-          <main class="editor-canvas" ?inert=${this._previewOpen && !this._desktopPreview} data-yaml-invalid=${!session.yamlValid && this._workbenchRoute !== 'yaml'}>
-            <div class="mobile-stage-select">
-              <ha-select
-                .label=${'Settings stage'}
-                .value=${this._workbenchRoute}
-                @selected=${(event: Event) => this._goToRoute((event.target as HTMLSelectElement).value as WorkbenchRoute)}
-              >
-                ${routes.map(({ route, label }) => html`<ha-list-item .value=${route}>${label}</ha-list-item>`)}
-              </ha-select>
-            </div>
+          <main class="editor-canvas" ?inert=${this._previewOpen && !this._desktopPreview}>
             ${!session.yamlValid && this._workbenchRoute !== 'yaml'
               ? html`<ha-alert alert-type="warning" class="stale-preview-alert">
                   YAML contains errors. Visual controls and preview show the last valid version.
                   <ha-button appearance="plain" size="s" @click=${() => this._goToRoute('yaml')}>Fix YAML</ha-button>
                 </ha-alert>`
               : nothing}
+            <div
+              ?hidden=${this._workbenchRoute !== 'organize' && this._workbenchRoute !== 'items'}
+              ?inert=${!session.yamlValid}
+            >
+              ${this._renderStage(
+                'Organize',
+                '',
+                html`<section class="settings-section">${this._renderPanelConfig('layout')}</section>`
+              )}
+            </div>
+            <div ?hidden=${this._workbenchRoute !== 'appearance'} ?inert=${!session.yamlValid}>
+              ${this._renderStage('Appearance', '', this._renderBaseConfig())}
+            </div>
             ${this._renderWorkbenchRoute()}
           </main>
 
@@ -603,7 +633,8 @@ export class SidebarConfigDialog extends BaseEditor {
           >
             ${this._desktopPreview
               ? html`<div class="preview-heading"><span>Live preview</span><small>Updates as you edit</small></div>`
-              : html`<div class="drawer-header"><strong>Sidebar preview</strong>
+              : html`<div class="drawer-header">
+                  <strong>Sidebar preview</strong>
                   <ha-icon-button
                     .label=${'Close preview'}
                     .path=${'M19,6.41 17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z'}
@@ -616,9 +647,12 @@ export class SidebarConfigDialog extends BaseEditor {
 
         <footer class="workbench-actions" ?inert=${this._previewOpen && !this._desktopPreview}>
           <div class="apply-state">
-            ${this.saveBlockedReason
-              ? html`<ha-icon icon="mdi:information-outline"></ha-icon><span>${this.saveBlockedReason}</span>`
-              : html`<ha-icon icon="mdi:check-circle-outline"></ha-icon><span>Ready to review and apply.</span>`}
+            ${html`<span
+              >${session.dirty ? 'Draft on this device · Not applied' : 'No unapplied changes'}${this
+                .saveBlockedReason && session.dirty
+                ? html`<small>${this.saveBlockedReason}</small>`
+                : nothing}</span
+            >`}
           </div>
           <div class="action-buttons">
             ${session.dirty
@@ -627,11 +661,10 @@ export class SidebarConfigDialog extends BaseEditor {
             <ha-button appearance="plain" @click=${() => this._mainDialog.closeDialog()}>Close</ha-button>
             <ha-button
               appearance="accent"
-              .disabled=${Boolean(this.saveBlockedReason)}
-              @click=${() =>
-                this._workbenchRoute === 'review' ? this._requestApply() : this._goToRoute('review')}
+              .disabled=${this._workbenchRoute === 'review' && Boolean(this.saveBlockedReason)}
+              @click=${() => (this._workbenchRoute === 'review' ? this._requestApply() : this._goToRoute('review'))}
             >
-              ${this._workbenchRoute === 'review' ? 'Apply changes' : 'Review & Apply'}
+              ${this._workbenchRoute === 'review' ? `Apply to ${targetName}` : 'Review changes'}
             </ha-button>
           </div>
         </footer>
@@ -641,41 +674,22 @@ export class SidebarConfigDialog extends BaseEditor {
     `;
   }
 
-  private _renderWorkbenchRoute(): TemplateResult {
-    const route = this._workbenchRoute;
-    if (route === 'sidebar') return this._renderStage('Profile', 'Choose which configuration you are editing and how it is synchronized.', this._renderSettingsOverview());
-    if (route === 'appearance') return this._renderStage('Appearance', 'Tune the sidebar’s title, behaviour, dimensions, theme and colours.', this._renderBaseConfig());
-    if (route === 'items') {
-      return this._renderStage(
-        'Items',
-        'Choose what is available in the sidebar and configure item-specific behaviour.',
-        html`
-          <section class="settings-section">
-            <div class="section-heading"><div><h2>Visibility</h2><p>Hide items, add conditional rules and configure notification badges.</p></div></div>
-            ${this._renderPanelConfig('items')}
-          </section>
-          <section class="settings-section custom-items">
-            <div class="section-heading"><div><h2>Custom items</h2><p>Create links, panels and actions. Assign them to a group in Layout.</p></div></div>
-            ${this._renderNewItemsConfig()}
-          </section>
-        `
-      );
-    }
-    if (route === 'organize') {
-      return this._renderStage(
-        'Layout',
-        'Create groups, assign items and set the order in which they appear.',
-        html`
-          <section class="settings-section structure-builder">${this._renderPanelConfig('layout')}</section>
-        `
-      );
-    }
-    if (route === 'yaml') return this._renderYamlWorkbench();
-    return this._renderReview();
+  private _renderWorkbenchRoute(): TemplateResult | typeof nothing {
+    if (this._workbenchRoute === 'sidebar')
+      return this._renderStage('Profiles and sync', '', this._renderSettingsOverview());
+    if (this._workbenchRoute === 'yaml') return this._renderYamlWorkbench();
+    if (this._workbenchRoute === 'review') return this._renderReview();
+    return nothing;
   }
 
   private _renderStage(title: string, description: string, content: TemplateResult): TemplateResult {
-    return html`<section class="stage"><div class="stage-heading"><h1>${title}</h1><p>${description}</p></div>${content}</section>`;
+    return html`<section class="stage">
+      <div class="stage-heading">
+        <h1 tabindex="-1">${title}</h1>
+        ${description ? html`<p>${description}</p>` : nothing}
+      </div>
+      ${content}
+    </section>`;
   }
 
   private _renderYamlWorkbench(): TemplateResult {
@@ -685,7 +699,9 @@ export class SidebarConfigDialog extends BaseEditor {
       'Edit the same configuration directly. Formatting runs only when you ask for it.',
       html`
         <div class="yaml-toolbar">
-          <ha-button appearance="plain" @click=${this._formatYaml}><ha-icon slot="start" icon="mdi:format-align-left"></ha-icon>Format YAML</ha-button>
+          <ha-button appearance="plain" @click=${this._formatYaml}
+            ><ha-icon slot="start" icon="mdi:format-align-left"></ha-icon>Format YAML</ha-button
+          >
           <span>Shortcut: Shift + Alt + F</span>
         </div>
         <sidebar-workbench-yaml-editor
@@ -703,13 +719,27 @@ export class SidebarConfigDialog extends BaseEditor {
     const session = this._session!;
     const info = this._configSource === 'home_assistant_profile' ? this._profileInfo : this._haConfigInfo;
     return this._renderStage(
-      'Review & Apply',
-      'Nothing is published until you apply. Home Assistant validation and revision checks run again immediately before writing.',
+      'Review changes',
+      'Check your changes, then apply them to the selected sidebar.',
       html`
         <div class="review-grid">
           <section class="workbench-card review-summary">
-            <h2>Publication</h2>
-            <dl><div><dt>Target</dt><dd>${this._activeTargetName()}</dd></div><div><dt>Source</dt><dd>${this._configSource.replaceAll('_', ' ')}</dd></div><div><dt>Backup</dt><dd>${info.backup_exists || ('profile_backup_exists' in info && info.profile_backup_exists) ? 'Available' : 'Created by Home Assistant on write'}</dd></div></dl>
+            <h2>Apply to ${this._activeTargetName()}</h2>
+            <p>${this._targetAudience()}</p>
+            <dl>
+              <div>
+                <dt>Target</dt>
+                <dd>${this._activeTargetName()}</dd>
+              </div>
+              <div>
+                <dt>Backup</dt>
+                <dd>
+                  ${info.backup_exists || ('profile_backup_exists' in info && info.profile_backup_exists)
+                    ? 'Available'
+                    : 'Created when you apply'}
+                </dd>
+              </div>
+            </dl>
             <div class="review-actions">
               <ha-button appearance="plain" @click=${this._downloadCurrentDraft}>Download draft</ha-button>
               ${isHomeAssistantConfigSource(this._configSource)
@@ -717,45 +747,124 @@ export class SidebarConfigDialog extends BaseEditor {
                 : nothing}
             </div>
           </section>
-          <section class="workbench-card"><h2>Changes</h2>
+          <section class="workbench-card">
+            <h2>Changes</h2>
             ${session.changes.length
-              ? html`<ul class="change-list">${session.changes.map((change) => html`<li><span data-kind=${change.kind}>${change.kind}</span>${change.label}</li>`)}</ul>`
-              : html`<p class="empty-state">No configuration changes yet.</p>`}
+              ? html`<ul class="change-list">
+                  ${session.changes.map(
+                    (change) => html`<li><span data-kind=${change.kind}>${change.kind}</span>${change.label}</li>`
+                  )}
+                </ul>`
+              : html`<p class="empty-state">
+                  ${!session.yamlValid
+                    ? 'Repair the YAML before applying.'
+                    : session.dirty
+                      ? 'YAML comments or formatting changed.'
+                      : 'No changes to apply.'}
+                </p>`}
           </section>
         </div>
         ${this._renderProblems(session.issues)}
-        <details class="workbench-card raw-diff"><summary><strong>Raw YAML comparison</strong><small>Baseline and current draft</small></summary>
-          <div class="diff-columns"><div><h3>Published</h3><pre>${session.baselineRawYaml}</pre></div><div><h3>Draft</h3><pre>${session.rawYaml}</pre></div></div>
+        <details class="workbench-card raw-diff">
+          <summary><strong>Raw YAML comparison</strong><small>Baseline and current draft</small></summary>
+          <div class="diff-columns">
+            <div>
+              <h3>Published</h3>
+              <pre>${session.baselineRawYaml}</pre>
+            </div>
+            <div>
+              <h3>Draft</h3>
+              <pre>${session.rawYaml}</pre>
+            </div>
+          </div>
         </details>
       `
     );
   }
 
   private _renderProblems(issues: ValidationIssue[]): TemplateResult {
-    return html`<section class="workbench-card problems"><h2>Problems <span>${issues.length}</span></h2>
+    return html`<section class="workbench-card problems">
+      <h2>Problems <span>${issues.length}</span></h2>
       ${issues.length
-        ? html`<ul>${issues.map((issue) => html`<li><button @click=${() => this._openIssue(issue)}><ha-icon icon=${issue.severity === 'error' ? 'mdi:alert-circle' : 'mdi:alert-outline'}></ha-icon><span><strong>${issue.message}</strong><small>${issue.line ? `Line ${issue.line}, column ${issue.column || 1}` : issue.path.join('.') || issue.route}</small></span></button></li>`)}</ul>`
-        : html`<p class="empty-state"><ha-icon icon="mdi:check-circle-outline"></ha-icon>No validation problems found.</p>`}
+        ? html`<ul>
+            ${issues.map(
+              (issue) =>
+                html`<li>
+                  <button @click=${() => this._openIssue(issue)}>
+                    <ha-icon icon=${issue.severity === 'error' ? 'mdi:alert-circle' : 'mdi:alert-outline'}></ha-icon
+                    ><span
+                      ><strong>${issue.message}</strong
+                      ><small
+                        >${issue.line
+                          ? `Line ${issue.line}, column ${issue.column || 1}`
+                          : issue.path.join('.') || issue.route}</small
+                      ></span
+                    >
+                  </button>
+                </li>`
+            )}
+          </ul>`
+        : html`<p class="empty-state">
+            <ha-icon icon="mdi:check-circle-outline"></ha-icon>No validation problems found.
+          </p>`}
     </section>`;
   }
 
   private _renderDraftRecovery(offer: { state: 'matching' | 'stale'; draft: EditorDraftEnvelope }): TemplateResult {
     const stale = offer.state === 'stale';
     return html`<ha-alert alert-type=${stale ? 'warning' : 'info'} class="draft-recovery">
-      <div><strong>${stale ? 'A draft was created from an older published revision.' : 'A recoverable draft is available.'}</strong>
-      <span>${stale ? 'Compare or download it before choosing whether to recover it.' : `Last edited ${new Date(offer.draft.timestamp).toLocaleString()}.`}</span></div>
+      <div>
+        <strong
+          >${stale
+            ? 'A draft was created from an older published revision.'
+            : 'A recoverable draft is available.'}</strong
+        >
+        <span
+          >${stale
+            ? 'Compare or download it before choosing whether to recover it.'
+            : `Last edited ${new Date(offer.draft.timestamp).toLocaleString()}.`}</span
+        >
+      </div>
       <div class="draft-actions">
-        ${stale ? html`<ha-button appearance="plain" @click=${() => this._downloadDraft(offer.draft)}>Download</ha-button>` : nothing}
+        ${stale
+          ? html`<ha-button appearance="plain" @click=${() => this._downloadDraft(offer.draft)}>Download</ha-button>`
+          : nothing}
         <ha-button appearance="plain" @click=${this._discardOfferedDraft}>Discard</ha-button>
-        <ha-button appearance="accent" @click=${() => this._resumeDraft(offer.draft)}>${stale ? 'Open recovery copy' : 'Resume'}</ha-button>
+        <ha-button appearance="accent" @click=${() => this._resumeDraft(offer.draft)}
+          >${stale ? 'Open recovery copy' : 'Resume'}</ha-button
+        >
       </div>
     </ha-alert>`;
   }
 
   private _goToRoute(route: WorkbenchRoute): void {
-    this._workbenchRoute = route;
-    this._session?.setRoute(route);
-    if (route !== 'organize' && this._dialogPreview) this._dialogPreview._hightlightItem(null);
+    const next = route === 'items' ? 'organize' : route;
+    const canvas = this.shadowRoot?.querySelector<HTMLElement>('.editor-canvas');
+    this._routeScroll.set(this._workbenchRoute, canvas?.scrollTop || 0);
+    this._workbenchRoute = next;
+    this._session?.setRoute(next);
+    void this.updateComplete.then(() => {
+      if (canvas) canvas.scrollTop = this._routeScroll.get(next) || 0;
+      this.shadowRoot?.querySelector<HTMLElement>('.editor-canvas > :not([hidden]) h1')?.focus({ preventScroll: true });
+    });
+  }
+
+  private _targetAudience(): string {
+    return this._configSource === 'home_assistant_config'
+      ? 'Used by everyone without a personal sidebar.'
+      : this._configSource === 'home_assistant_profile'
+        ? 'Personal sidebar, available on this user’s devices.'
+        : this._configSource === 'browser_storage'
+          ? 'Used only in this browser.'
+          : 'Loaded from your legacy YAML file.';
+  }
+
+  public showPreview(group?: string | null, item?: string): void {
+    this._openPreview();
+    void this.updateComplete.then(() => {
+      if (item) void this._dialogPreview?.revealItem(item);
+      else if (group) this._dialogPreview?._toggleGroup(group, 'show');
+    });
   }
 
   public navigateWorkbench(route: WorkbenchRoute): void {
@@ -764,10 +873,10 @@ export class SidebarConfigDialog extends BaseEditor {
 
   private _activeTargetName(): string {
     if (this._configSource === 'home_assistant_profile') {
-      if (this._selectedProfile === 'shared') return 'Shared default';
+      if (this._selectedProfile === 'shared') return 'shared sidebar';
       return this._profileUsers.find((user) => user.id === this._selectedProfile)?.name || 'Personal profile';
     }
-    if (this._configSource === 'home_assistant_config') return 'Shared default';
+    if (this._configSource === 'home_assistant_config') return 'shared sidebar';
     if (this._configSource === 'static_yaml') return 'Legacy YAML file';
     return 'This browser';
   }
@@ -795,12 +904,13 @@ export class SidebarConfigDialog extends BaseEditor {
   }
 
   private _openIssue(issue: ValidationIssue): void {
-    this._goToRoute(issue.route);
-    if (issue.route === 'yaml') {
-      void this.updateComplete.then(() =>
-        this.shadowRoot?.querySelector<SidebarWorkbenchYamlEditor>('sidebar-workbench-yaml-editor')?.revealIssue(issue)
-      );
-    }
+    const route = !this._session?.yamlValid ? 'yaml' : issue.route;
+    this._goToRoute(route);
+    void this.updateComplete.then(() => {
+      if (route === 'yaml')
+        this.shadowRoot?.querySelector<SidebarWorkbenchYamlEditor>('sidebar-workbench-yaml-editor')?.revealIssue(issue);
+      else if (route === 'organize' || route === 'items') this._dialogPanels?.revealIssue(issue.path);
+    });
   }
 
   private _requestApply(): void {
@@ -829,16 +939,30 @@ export class SidebarConfigDialog extends BaseEditor {
     }
     if (event.key === 'Tab') {
       const drawer = this.shadowRoot?.querySelector<HTMLElement>('.preview-drawer');
-      const focusable = [...(drawer?.querySelectorAll<HTMLElement>('button, ha-button, ha-icon-button, [tabindex="0"]') || [])].filter(
-        (element) => !element.hasAttribute('disabled')
-      );
+      const focusable: HTMLElement[] = [];
+      const collect = (root: Element | ShadowRoot) => {
+        for (const child of root.children) {
+          if (
+            !(child instanceof HTMLElement) ||
+            child.hidden ||
+            child.inert ||
+            child.hasAttribute('disabled') ||
+            !child.getClientRects().length
+          )
+            continue;
+          if (child.tabIndex >= 0) focusable.push(child);
+          else if (child.shadowRoot) collect(child.shadowRoot);
+          collect(child);
+        }
+      };
+      if (drawer) collect(drawer);
       if (!focusable.length) return;
       const first = focusable[0];
       const last = focusable.at(-1)!;
-      if (event.shiftKey && this.shadowRoot?.activeElement === first) {
+      if (event.shiftKey && event.composedPath().includes(first)) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && this.shadowRoot?.activeElement === last) {
+      } else if (!event.shiftKey && event.composedPath().includes(last)) {
         event.preventDefault();
         first.focus();
       }
@@ -960,7 +1084,7 @@ export class SidebarConfigDialog extends BaseEditor {
           )}
           ${this._invalidConfig && hasBlockingConfigErrors(this._invalidConfig)
             ? html`<ha-alert alert-type="error">
-                A panel is assigned more than once. Open Panels and remove duplicate assignments before saving.
+                A panel is assigned more than once. Open Organize and remove duplicate assignments before saving.
               </ha-alert>`
             : nothing}
           ${this._haConfigErrors.length
@@ -1050,7 +1174,8 @@ export class SidebarConfigDialog extends BaseEditor {
     const canManageSelected = Boolean(
       this._selectedProfile !== 'shared' &&
       (this.hass.user?.is_admin || this._selectedProfile === currentUserId) &&
-      this._profileInfo.allow_write && !this._saving
+      this._profileInfo.allow_write &&
+      !this._saving
     );
 
     return html`
@@ -2180,12 +2305,22 @@ export class SidebarConfigDialog extends BaseEditor {
   }
 
   public get pickedItems(): string[] {
-    return Array.from(this._panelConfigMap.values()).flat();
+    return [
+      ...Object.values(this._sidebarConfig.custom_groups || {}).flat(),
+      ...Object.values(this._sidebarConfig.bottom_groups || {}).flat(),
+      ...(this._sidebarConfig.bottom_items || []),
+      ...(this._sidebarConfig.bottom_grid_items || []),
+    ];
   }
 
   public get ungroupedItems(): string[] {
     const defaultPanel = getDefaultPanelUrlPath(this.hass);
-    const assignedSet = new Set([...this.pickedItems, ...(this._sidebarConfig?.hidden_items || []), defaultPanel]);
+    const assignedSet = new Set([
+      ...this.pickedItems,
+      ...(this._sidebarConfig?.hidden_items || []),
+      defaultPanel,
+      ...(!this._sidebarConfig.move_settings_from_fixed ? ['config'] : []),
+    ]);
     const ungroupedItems = this._initCombiPanels.filter((item) => !assignedSet.has(item));
     return ungroupedItems;
   }
@@ -2203,8 +2338,7 @@ export class SidebarConfigDialog extends BaseEditor {
 
   public get pickedWithoutUncategorizedFromCustom(): string[] {
     const itemsFromCustom = this._sidebarConfig[PANEL_TYPE.CUSTOM_GROUPS]?.[PANEL_TYPE.UNCATEGORIZED_ITEMS] || [];
-    const pickedWithoutUncategorizedFromCustom = Array.from(this._panelConfigMap.values())
-      .flat()
+    const pickedWithoutUncategorizedFromCustom = this.pickedItems
       .filter((item) => !itemsFromCustom.includes(item));
     return pickedWithoutUncategorizedFromCustom;
   }
@@ -2228,17 +2362,22 @@ export class SidebarConfigDialog extends BaseEditor {
   };
 
   public _getGroupOfPanel = (panel: string): string | null => {
-    const group = [...this._panelConfigMap.entries()].find(([, items]) => items.includes(panel));
+    const assignments = [
+      ...Object.entries(this._sidebarConfig.custom_groups || {}),
+      ...Object.entries(this._sidebarConfig.bottom_groups || {}),
+      ['bottom_items', this._sidebarConfig.bottom_items || []],
+      ['bottom_grid_items', this._sidebarConfig.bottom_grid_items || []],
+    ] as [string, string[]][];
+    const group = assignments.find(([, items]) => items.includes(panel));
     return group ? group[0] : null;
   };
 
   private _handleItemClicked(event: CustomEvent) {
     event.stopPropagation();
     const panel = event.detail as string;
-    const inGroup = this._getGroupOfPanel(panel);
-    if (this._dialogPanels) {
-      this._dialogPanels.clickedPanelInPreview(panel, inGroup);
-    }
+    this._goToRoute('organize');
+    this._dialogPanels?.selectItem(panel);
+    if (!this._desktopPreview) this._closePreview();
   }
 
   static get styles(): CSSResultGroup {
@@ -2260,7 +2399,7 @@ export class SidebarConfigDialog extends BaseEditor {
         .workbench {
           box-sizing: border-box;
           display: grid;
-          grid-template-rows: auto auto minmax(0, 1fr) auto;
+          grid-template-rows: auto auto auto minmax(0, 1fr) auto;
           height: 100%;
           min-height: 0;
           overflow: hidden;
@@ -2334,9 +2473,9 @@ export class SidebarConfigDialog extends BaseEditor {
         .status-chip[data-state='valid'] { color: var(--success-color, #43a047); }
         .preview-toggle { display: inline-flex; min-height: 44px; }
         .workbench-body {
-          align-items: start;
+          align-items: stretch;
           display: grid;
-          grid-template-columns: 232px minmax(0, 1fr);
+          grid-template-columns: minmax(0, 1fr);
           min-height: 0;
           overflow: auto;
           overscroll-behavior: contain;
@@ -2380,8 +2519,10 @@ export class SidebarConfigDialog extends BaseEditor {
         .stage-error { color: var(--error-color); }
         .editor-canvas {
           min-width: 0;
-          overflow: visible;
-          padding: 28px clamp(20px, 4vw, 64px) 72px;
+          overflow: auto;
+          height: 100%;
+          box-sizing: border-box;
+          padding: 24px 24px 36px;
         }
         .desktop-preview {
           background: var(--primary-background-color);
@@ -2490,13 +2631,13 @@ export class SidebarConfigDialog extends BaseEditor {
           pointer-events: none;
         }
 
-        @media (min-width: 1500px) {
-          .workbench-body { grid-template-columns: 232px minmax(0, 1fr) minmax(320px, 380px); }
+        @media (min-width: 1100px) {
+          .workbench-body { grid-template-columns: minmax(0, 1fr) 300px; }
           .desktop-preview { display: block; }
           .preview-toggle { display: none; }
         }
 
-        @media (max-width: 1499px) {
+        @media (max-width: 1099px) {
           .preview-scrim {
             background: rgba(0, 0, 0, .45);
             display: block;
@@ -2529,8 +2670,8 @@ export class SidebarConfigDialog extends BaseEditor {
           .preview-drawer #sidebar-preview { margin: auto; max-width: 340px; }
         }
 
-        @media (max-width: 1199px) {
-          .workbench-body { grid-template-columns: 220px minmax(0, 1fr); }
+        @media (min-width: 1100px) and (max-width: 1199px) {
+          .workbench-body { grid-template-columns: minmax(0, 1fr) 280px; }
         }
 
         @media (max-width: 767px) {
@@ -2538,20 +2679,116 @@ export class SidebarConfigDialog extends BaseEditor {
           .header-status { display: none; }
           .target-control { flex: 1; overflow: hidden; }
           .target-control strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .preview-toggle { font-size: 0; min-width: 44px; }
+          .preview-toggle { min-width: 44px; }
           .preview-toggle ha-icon { font-size: initial; }
-          .workbench-body { display: block; overflow: auto; }
+          .workbench-body { display: block; overflow: hidden; }
           .task-rail { display: none; }
           .mobile-stage-select { display: block; margin-bottom: 16px; }
-          .editor-canvas { overflow: visible; padding: 12px 12px 110px; }
+          .editor-canvas { overflow: auto; padding: 18px 12px 28px; }
           .review-grid, .diff-columns { grid-template-columns: 1fr; }
           .diff-columns pre { max-width: calc(100vw - 58px); }
           .workbench-actions { align-items: stretch; flex-direction: column; gap: 6px; padding: 8px; }
           .apply-state { padding-inline: 6px; }
-          .action-buttons { display: flex; width: 100%; }
-          .action-buttons ha-button:last-child { flex: 1; }
-          .preview-drawer { max-width: none; padding: 8px; width: 100vw; }
+          .action-buttons { display: flex; flex-wrap: wrap; width: 100%; }
+          .action-buttons ha-button:last-child { flex: 1 1 150px; min-width: 0; }
+          .preview-drawer { box-sizing: border-box; max-width: none; padding: 8px; width: 100vw; }
           .yaml-toolbar span { display: none; }
+        }
+        :host [hidden] {
+          display: none !important;
+        }
+        .target-picker {
+          display: grid;
+          gap: 2px;
+          min-width: 130px;
+        }
+        .target-picker > span {
+          color: var(--secondary-text-color);
+          font-size: 0.75rem;
+        }
+        .target-picker select {
+          background: transparent;
+          border: 0;
+          border-radius: 4px;
+          color: var(--primary-text-color);
+          cursor: pointer;
+          font: inherit;
+          font-weight: 600;
+          min-height: 30px;
+          max-width: 260px;
+        }
+        select option {
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color);
+        }
+        .target-audience {
+          color: var(--secondary-text-color);
+          flex: 1;
+          font-size: 0.82rem;
+          margin: 0;
+        }
+        .issues-link {
+          background: transparent;
+          border: 0;
+          color: var(--error-color);
+          cursor: pointer;
+          min-height: 44px;
+        }
+        .workspace-nav {
+          align-items: center;
+          border-bottom: 1px solid var(--divider-color);
+          display: flex;
+          gap: 6px;
+          padding: 4px 12px;
+        }
+        .workspace-nav .task-link {
+          display: inline-flex;
+          width: auto;
+          min-height: 44px;
+          padding: 8px 12px;
+        }
+        .advanced-menu {
+          margin-inline-start: auto;
+        }
+        .apply-state small {
+          display: block;
+          margin-top: 3px;
+        }
+        button:focus-visible,
+        select:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
+        h1:focus {
+          outline: none;
+        }
+        .desktop-preview {
+          height: 100%;
+          box-sizing: border-box;
+        }
+        @media (max-width: 767px) {
+          .target-audience {
+            display: none;
+          }
+          .target-picker {
+            flex: 1;
+            min-width: 0;
+          }
+          .target-picker select {
+            max-width: 100%;
+          }
+          .workspace-nav {
+            padding: 4px 6px;
+            gap: 0;
+          }
+          .workspace-nav .task-link {
+            padding: 8px;
+            font-size: 0.9rem;
+            gap: 5px;
+          }
+          .workspace-nav .task-link ha-icon {
+            width: 20px;
+          }
         }
         .loading-content {
           display: flex;

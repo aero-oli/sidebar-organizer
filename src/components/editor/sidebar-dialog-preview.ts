@@ -13,7 +13,10 @@ import { html, css, TemplateResult, PropertyValues, CSSResultGroup, nothing } fr
 import { property, query, queryAll, state } from 'lit/decorators.js';
 import { styleMap } from 'lit/directives/style-map.js';
 
+type PreviewPanel = PanelInfo & { previewId?: string };
+
 export interface PreviewPanels {
+  ungrouped_items?: PreviewPanel[];
   custom_groups?: Record<string, PanelInfo[]>;
   bottom_groups?: Record<string, PanelInfo[]>;
   bottom_items?: PanelInfo[];
@@ -36,6 +39,7 @@ export class SidebarDialogPreview extends BaseEditor {
   @state() private _previewPanels: PreviewPanels = {};
   @state() private _collapsedGroups = new Set<string>();
   @state() private _ready = false;
+  @state() private _highlightedItem: string | null = null;
   private _templateUnsubscribers = new Set<() => void>();
   private _subscriptionGeneration = 0;
 
@@ -51,10 +55,12 @@ export class SidebarDialogPreview extends BaseEditor {
   }
 
   protected willUpdate(_changedProperties: PropertyValues): void {
-    if (_changedProperties.has('_sidebarConfig') && this._sidebarConfig && isEmpty(this._previewPanels)) {
+    if (!_changedProperties.has('_sidebarConfig') || !this._sidebarConfig) return;
+    const oldConfig = _changedProperties.get('_sidebarConfig') as SidebarConfig | undefined;
+    if (oldConfig) {
+      this._updatePanelConfig(oldConfig, this._sidebarConfig);
+    } else {
       this._previewPanels = this._computePreviewPanels();
-      !isEmpty(this._previewPanels) &&
-        console.log('%cSIDEBAR-DIALOG-PREVIEW:', 'color: #40c057;', 'Computed preview panels:', this._previewPanels);
     }
   }
 
@@ -94,7 +100,6 @@ export class SidebarDialogPreview extends BaseEditor {
       const oldConfig = _changedProperties.get('_sidebarConfig') as SidebarConfig | undefined;
       const newConfig = this._sidebarConfig;
       if (oldConfig && newConfig) {
-        this._updatePanelConfig(oldConfig, newConfig);
         this._updateThemeChange(oldConfig, newConfig);
         this._updateNotificationChange(oldConfig, newConfig);
       }
@@ -142,12 +147,11 @@ export class SidebarDialogPreview extends BaseEditor {
     if (
       Object.values(changedFlags).some((changed) => changed) ||
       customGroupsOrderChanged ||
-      bottomGroupsOrderChanged
+      bottomGroupsOrderChanged ||
+      settingsItemMovedChanged
     ) {
       // update the listbox if any of the panel groups config changed
       this._updateListbox(newConfig);
-    } else if (settingsItemMovedChanged) {
-      this.requestUpdate();
     }
   }
 
@@ -318,28 +322,45 @@ export class SidebarDialogPreview extends BaseEditor {
   }
 
   private _computePreviewPanels(): PreviewPanels {
-    const previewPanels: PreviewPanels = {};
-
-    const { custom_groups, bottom_groups, bottom_items, bottom_grid_items } = this._sidebarConfig || {};
-    if (custom_groups) {
-      previewPanels.custom_groups = {};
-      Object.entries(custom_groups).forEach(([groupName, items]) => {
-        previewPanels.custom_groups![groupName] = items.map((item) => this._getPanelInfo(item));
-      });
-    }
-    if (bottom_groups) {
-      previewPanels.bottom_groups = {};
-      Object.entries(bottom_groups).forEach(([groupName, items]) => {
-        previewPanels.bottom_groups![groupName] = items.map((item) => this._getPanelInfo(item));
-      });
-    }
-    if (bottom_items) {
-      previewPanels.bottom_items = bottom_items.map((item) => this._getPanelInfo(item));
-    }
-    if (bottom_grid_items) {
-      previewPanels.bottom_grid_items = bottom_grid_items.map((item) => this._getPanelInfo(item));
-    }
+    const config = this._sidebarConfig || {};
+    const defaultPanel = getDefaultPanelUrlPath(this.hass);
+    const assigned = new Set<string>([defaultPanel]);
+    if (!config.move_settings_from_fixed) assigned.add('config');
+    const hidden = new Set(config.hidden_items || []);
+    const customItems = new Map((config.new_items || []).map((item) => [item.title!, item]));
+    const visible = (id: string) => !hidden.has(id) && customItems.get(id)?.show_in_sidebar !== false;
+    const panels = (ids: string[]) =>
+      ids
+        .filter((id) => {
+          if (assigned.has(id) || !visible(id)) return false;
+          assigned.add(id);
+          return true;
+        })
+        .map((id) => this._getPreviewPanelInfo(id));
+    const groups = (entries: Record<string, string[]> = {}) =>
+      Object.fromEntries(Object.entries(entries).map(([name, ids]) => [name, panels(ids)]));
+    const previewPanels: PreviewPanels = {
+      custom_groups: groups(config.custom_groups),
+      bottom_groups: groups(config.bottom_groups),
+      bottom_items: panels(config.bottom_items || []),
+      bottom_grid_items: panels(config.bottom_grid_items || []),
+    };
+    // Parent placement caches may still describe the previous draft during this render.
+    const candidates = [
+      ...(this._dialog._initCombiPanels || []).filter((id) => id in this.hass.panels),
+      ...customItems.keys(),
+      ...(config.move_settings_from_fixed && this.hass.panels.config ? ['config'] : []),
+    ];
+    previewPanels.ungrouped_items = panels(candidates);
     return previewPanels;
+  }
+
+  private _getPreviewPanelInfo(id: string): PreviewPanel {
+    const custom = this._sidebarConfig.new_items?.find((item) => item.title === id);
+    return {
+      ...(custom ? { ...custom, component_name: 'new-item' } : this._getPanelInfo(id)),
+      previewId: id,
+    };
   }
 
   private _setTheme(mode: string): void {
@@ -364,7 +385,7 @@ export class SidebarDialogPreview extends BaseEditor {
   protected render(): TemplateResult {
     const defaultPanel = getDefaultPanelUrlPath(this.hass);
     const lovelacePanel = () => {
-      const defaultDash = this._getPanelInfo(defaultPanel);
+      const defaultDash = this._getPreviewPanelInfo(defaultPanel);
       return this._renderPanel(defaultDash);
     };
 
@@ -396,10 +417,10 @@ export class SidebarDialogPreview extends BaseEditor {
                 <div class="divider"></div>
                 <div class="bottom-grid-panel">${this._renderBottomGridPanels()}</div>
               `}
-          ${this._dialog._settingItemMoved
+          ${this._sidebarConfig.move_settings_from_fixed || this._sidebarConfig.hidden_items?.includes('config')
             ? nothing
             : html`<div class="divider"></div>
-                ${this._renderPanel(this._getPanelInfo('config'))}`}
+                ${this._renderPanel(this._getPreviewPanelInfo('config'))}`}
         </div>
       </div>
     </div>`;
@@ -416,13 +437,27 @@ export class SidebarDialogPreview extends BaseEditor {
       const isCollapsed = this._collapsedGroups.has(groupName);
       return html`${isUncategorized
           ? nothing
-          : html`<div class="divider-container" group=${groupName} @click=${() => this._toggleColapsed(groupName)}>
+          : html`<div
+              class="divider-container"
+              group=${groupName}
+              role="button"
+              tabindex="0"
+              aria-label=${`Toggle ${groupName}`}
+              aria-expanded=${!isCollapsed}
+              @keydown=${(event: KeyboardEvent) => this._activateOnKey(event, () => this._toggleColapsed(groupName))}
+              @click=${() => this._toggleColapsed(groupName)}
+            >
               <div class="added-content" group=${groupName} ?collapsed=${isCollapsed}>
                 <ha-icon icon="mdi:chevron-down"></ha-icon>
                 <span>${groupName.trim()}</span>
               </div>
             </div>`}
-        <div class="group-items" ?collapsed=${isUncategorized ? false : isCollapsed} group=${groupName}>
+        <div
+          class="group-items"
+          ?inert=${!isUncategorized && isCollapsed}
+          ?collapsed=${isUncategorized ? false : isCollapsed}
+          group=${groupName}
+        >
           ${items.map((item: PanelInfo) => this._renderPanel(item))}
         </div>`;
     });
@@ -436,13 +471,22 @@ export class SidebarDialogPreview extends BaseEditor {
 
     return Object.entries(groups).map(([groupName, items]) => {
       const isCollapsed = this._collapsedGroups.has(groupName);
-      return html`<div class="divider-container" group=${groupName} @click=${() => this._toggleColapsed(groupName)}>
+      return html`<div
+          class="divider-container"
+          group=${groupName}
+          role="button"
+          tabindex="0"
+          aria-label=${`Toggle ${groupName}`}
+          aria-expanded=${!isCollapsed}
+          @keydown=${(event: KeyboardEvent) => this._activateOnKey(event, () => this._toggleColapsed(groupName))}
+          @click=${() => this._toggleColapsed(groupName)}
+        >
           <div class="added-content" group=${groupName} ?collapsed=${isCollapsed}>
             <ha-icon icon="mdi:chevron-down"></ha-icon>
             <span>${groupName.trim()}</span>
           </div>
         </div>
-        <div class="group-items" ?collapsed=${isCollapsed} group=${groupName}>
+        <div class="group-items" ?inert=${isCollapsed} ?collapsed=${isCollapsed} group=${groupName}>
           ${items.map((item: PanelInfo) => this._renderPanel(item))}
         </div>`;
     });
@@ -457,12 +501,7 @@ export class SidebarDialogPreview extends BaseEditor {
   }
 
   private _renderUngroupedPanels(): TemplateResult[] {
-    const ungroupedItems = this._dialog.ungroupedItems || [];
-    if (ungroupedItems.length === 0) {
-      return [];
-    }
-    const ungroupedPanels = ungroupedItems.map((itemId: string) => this._getPanelInfo(itemId));
-    return ungroupedPanels.map((item: PanelInfo) => this._renderPanel(item));
+    return (this._previewPanels.ungrouped_items || []).map((item) => this._renderPanel(item));
   }
 
   private _renderBottomGridPanels(): TemplateResult[] {
@@ -472,13 +511,25 @@ export class SidebarDialogPreview extends BaseEditor {
     }
     return bottomGridItems.map((item: PanelInfo) => this._renderPanel(item, true));
   }
-  private _renderPanel(panel: PanelInfo, gridItem: boolean = false): TemplateResult {
+  private _renderPanel(panel: PreviewPanel, gridItem: boolean = false): TemplateResult {
     const itemClicked = () => {
-      this._dispatchEvent('item-clicked', panel.url_path ?? panel.title);
+      this._dispatchEvent(
+        'item-clicked',
+        panel.previewId ?? (panel.component_name === 'new-item' ? panel.title : (panel.url_path ?? panel.title))
+      );
     };
 
     const { icon, title, url_path } = panel;
-    return html`<a data-panel=${url_path ?? title!} @click=${itemClicked}>
+    const id = panel.previewId ?? (panel.component_name === 'new-item' ? title! : (url_path ?? title!));
+    return html`<a
+      data-panel=${id}
+      ?highlight=${this._highlightedItem === id}
+      role="button"
+      tabindex="0"
+      aria-label=${`Edit ${title}`}
+      @click=${itemClicked}
+      @keydown=${(event: KeyboardEvent) => this._activateOnKey(event, itemClicked)}
+    >
       <div class="icon-item" ?grid-item=${gridItem}>
         <ha-icon .icon=${icon}> </ha-icon><span class="item-text">${title}</span>
       </div>
@@ -486,34 +537,38 @@ export class SidebarDialogPreview extends BaseEditor {
   }
 
   private _renderHeader(): TemplateResult {
-    const { header_title, hide_header_toggle, custom_groups } = this._sidebarConfig || {};
-    const groupKeys = custom_groups ? Object.keys(custom_groups) : [];
-    const collapsedSize = this._collapsedGroups.size;
-    const allCollapsed = collapsedSize === groupKeys.length;
+    const { header_title, hide_header_toggle, custom_groups, bottom_groups } = this._sidebarConfig || {};
+    const groupKeys = [...Object.keys(custom_groups || {}), ...Object.keys(bottom_groups || {})].filter(
+      (group) => group !== PANEL_TYPE.UNCATEGORIZED_ITEMS
+    );
+    const allCollapsed = groupKeys.every((group) => this._collapsedGroups.has(group));
     return html`<div class="menu-title">
       ${header_title || 'Home Assistant'}
       ${hide_header_toggle || groupKeys.length === 0
         ? nothing
-        : html`<ha-icon
-            .icon=${allCollapsed ? 'mdi:plus' : 'mdi:minus'}
+        : html`<button
+            type="button"
             class="collapse-toggle"
+            aria-label=${allCollapsed ? 'Expand all groups' : 'Collapse all groups'}
             @click=${() => this._handleCollapsedToggle()}
-          ></ha-icon>`}
+          >
+            <ha-icon .icon=${allCollapsed ? 'mdi:plus' : 'mdi:minus'}></ha-icon>
+          </button>`}
     </div>`;
   }
-  private _handleCollapsedToggle(): void {
-    const custom_groups = this._sidebarConfig?.custom_groups;
-    if (!custom_groups) {
-      return;
-    }
-    const groupKeys = Object.keys(custom_groups);
-    const collapsedSize = this._collapsedGroups.size;
+  private _activateOnKey(event: KeyboardEvent, action: () => void): void {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    action();
+  }
 
-    if (collapsedSize === groupKeys.length) {
-      this._collapsedGroups = new Set();
-    } else {
-      this._collapsedGroups = new Set(groupKeys);
-    }
+  private _handleCollapsedToggle(): void {
+    const groupKeys = [
+      ...Object.keys(this._sidebarConfig.custom_groups || {}),
+      ...Object.keys(this._sidebarConfig.bottom_groups || {}),
+    ].filter((group) => group !== PANEL_TYPE.UNCATEGORIZED_ITEMS);
+    const allCollapsed = groupKeys.every((group) => this._collapsedGroups.has(group));
+    this._collapsedGroups = allCollapsed ? new Set() : new Set(groupKeys);
     this.requestUpdate();
   }
 
@@ -536,51 +591,58 @@ export class SidebarDialogPreview extends BaseEditor {
 
   public _toggleGroup = (group: string | null, preview?: string) => {
     const groupKeys = [
-      ...Object.keys(this._previewPanels?.custom_groups || {}),
-      ...Object.keys(this._previewPanels?.bottom_groups || {}),
-    ];
-    this._collapsedGroups = new Set(
-      groupKeys.filter((groupName) => {
-        return groupName !== group;
-      })
-    );
+      ...Object.keys(this._sidebarConfig.custom_groups || {}),
+      ...Object.keys(this._sidebarConfig.bottom_groups || {}),
+    ].filter((name) => name !== PANEL_TYPE.UNCATEGORIZED_ITEMS);
+    this._collapsedGroups = new Set(groupKeys.filter((name) => name !== group));
     this.requestUpdate();
-    this.updateComplete.then(() => {
-      const children = this._groupsContainer.children;
-      const groupsContent = this._groupsContainer.querySelectorAll('div.divider-container') as NodeListOf<HTMLElement>;
-      const groupPanelSelected = Array.from(groupsContent).find((item) => item.getAttribute('group') === group);
-      if (groupPanelSelected) {
-        const addedContent = groupPanelSelected.querySelector('div.added-content') as HTMLElement;
-        addedContent.scrollIntoView({
-          behavior: 'smooth',
-          block: 'end',
-          inline: 'nearest',
-        });
-      }
-      const itemsEl = this._groupsContainer.querySelectorAll('div.group-items') as NodeListOf<HTMLElement>;
-      const groupItemsSelected = Array.from(itemsEl).find((item) => item.getAttribute('group') === group);
-      if (groupItemsSelected && !preview) {
-        groupItemsSelected.classList.add('hight-light');
-        groupItemsSelected.addEventListener('animationend', () => {
-          groupItemsSelected.classList.remove('hight-light');
-        });
-      }
+    return this.updateComplete.then(() => {
+      const root = this.shadowRoot;
+      if (!root) return;
+      const groupItems = Array.from(root.querySelectorAll<HTMLElement>('div.group-items'));
+      const selected = groupItems.find((item) => item.getAttribute('group') === group);
+      const wasSelected = selected?.hasAttribute('selected');
+      groupItems.forEach((item) => item.removeAttribute('selected'));
+      root.querySelectorAll('[dimmed]').forEach((item) => item.removeAttribute('dimmed'));
+      if (!selected) return;
+
+      selected.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
       if (preview) {
-        const hightLightItem = () => {
-          const filteredItems = Array.from(children).filter((item) => item.getAttribute('group') !== group);
-          const itemGroup = this._groupsContainer.querySelector(`div.group-items[group="${group}"]`) as HTMLElement;
-          const isSelected = itemGroup.hasAttribute('selected');
-          itemGroup.toggleAttribute('selected', !isSelected);
-          filteredItems.forEach((item) => (item as HTMLElement).toggleAttribute('dimmed', !isSelected));
-        };
-        hightLightItem();
-      }
-      if (group === null) {
-        this._groupsContainer.querySelectorAll('div.group-items').forEach((item) => item.removeAttribute('selected'));
-        Array.from(children).forEach((item) => (item as HTMLElement).removeAttribute('dimmed'));
+        const select = preview === 'show' || !wasSelected;
+        selected.toggleAttribute('selected', select);
+        Array.from(selected.parentElement?.children || []).forEach((item) => {
+          const isSameGroup = item.getAttribute('group') === group;
+          (item as HTMLElement).toggleAttribute('dimmed', select && !isSameGroup);
+        });
+      } else {
+        selected.classList.add('hight-light');
+        selected.addEventListener('animationend', () => selected.classList.remove('hight-light'), { once: true });
       }
     });
   };
+
+  public async revealItem(id: string): Promise<void> {
+    this._highlightedItem = id;
+    const config = this._sidebarConfig;
+    const group = [...Object.entries(config.custom_groups || {}), ...Object.entries(config.bottom_groups || {})].find(
+      ([, items]) => items.includes(id)
+    )?.[0];
+    if (group) this._collapsedGroups.delete(group);
+    this.requestUpdate();
+    await this.updateComplete;
+    const root = this.shadowRoot;
+    if (!root) return;
+    root.querySelectorAll('[dimmed]').forEach((item) => item.removeAttribute('dimmed'));
+    const items = Array.from(root.querySelectorAll<HTMLElement>('[data-panel]'));
+    items.forEach((item) => item.toggleAttribute('highlight', item.getAttribute('data-panel') === id));
+    items
+      .find((item) => item.getAttribute('data-panel') === id)
+      ?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'nearest',
+      });
+  }
 
   public _toggleBottomPanel(bottomPanel: BOTTOM_SECTION, anime: boolean = true) {
     this._collapsedGroups = new Set(Object.keys(this._previewPanels?.custom_groups || {}));
@@ -610,17 +672,10 @@ export class SidebarDialogPreview extends BaseEditor {
   }
 
   public _hightlightItem(panelId: string | null): void {
-    if (!panelId) {
-      Array.from(this._itemAnchorList).forEach((item) => item.removeAttribute('highlight'));
-      return;
-    }
-    const itemToHighlight = Array.from(this._itemAnchorList).find(
-      (item) => item.getAttribute('data-panel') === panelId
-    );
-    if (itemToHighlight) {
-      Array.from(this._itemAnchorList).forEach((item) => item.removeAttribute('highlight'));
-      itemToHighlight.setAttribute('highlight', '');
-    }
+    this._highlightedItem = panelId;
+    Array.from(this._itemAnchorList || []).forEach((item) => {
+      item.toggleAttribute('highlight', panelId !== null && item.getAttribute('data-panel') === panelId);
+    });
   }
 
   private _dispatchEvent(eventName: string, detail?: any) {
@@ -718,6 +773,21 @@ export class SidebarDialogPreview extends BaseEditor {
           padding-inline-start: 0.5em;
           justify-content: space-between;
           box-sizing: border-box;
+        }
+
+        .collapse-toggle {
+          border: 0;
+          background: transparent;
+          color: inherit;
+          cursor: pointer;
+          min-width: 44px;
+          min-height: 44px;
+        }
+        .collapse-toggle:focus-visible,
+        .divider-container:focus-visible,
+        a:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: -2px;
         }
 
         .panels-list {
@@ -1006,7 +1076,9 @@ export class SidebarDialogPreview extends BaseEditor {
           max-width: 28px;
         }
 
-        .notification-badge[hidden] { display: none !important; }
+        .notification-badge[hidden] {
+          display: none !important;
+        }
         .notification-badge {
           position: absolute;
           left: calc(var(--app-drawer-width, 248px) - 26px);

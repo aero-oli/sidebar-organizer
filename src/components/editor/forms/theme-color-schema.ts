@@ -9,13 +9,13 @@ export const CUSTOM_THEME_SCHEMA = (modeDisabled = false) =>
       schema: [
         {
           name: 'theme',
-          label: 'Custom Theme',
+          label: 'Sidebar theme',
           required: false,
           selector: { theme: { include_default: false } },
         },
         {
           name: 'mode',
-          label: 'Force Mode',
+          label: 'Theme mode',
           required: false,
           disabled: modeDisabled,
           selector: {

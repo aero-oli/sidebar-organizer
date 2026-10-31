@@ -96,8 +96,8 @@ test('duplicate assignments are structured, positioned, and routed to Layout', (
   assert.ok(issue?.column);
 });
 
-test('the visual workspace follows the five-stage settings flow', () => {
-  assert.deepEqual(WORKBENCH_NAV_ROUTES, ['sidebar', 'items', 'organize', 'appearance', 'yaml']);
+test('the visual workspace keeps two primary sections', () => {
+  assert.deepEqual(WORKBENCH_NAV_ROUTES, ['organize', 'appearance']);
 });
 
 test('item-specific validation issues open the Items stage', () => {

@@ -32,6 +32,7 @@ import { repeat } from 'lit/directives/repeat.js';
 
 import { SoPanelAll } from './shared/so-panel-all';
 import { collectNotificationSettings, updateNotificationSetting } from './workbench/notification-settings';
+import { getItemPlacement, moveItemToPlacement, type ItemPlacement } from './workbench/organization';
 
 @safeCustomElement('sidebar-dialog-panels')
 export class SidebarDialogPanels extends BaseEditor {
@@ -46,6 +47,14 @@ export class SidebarDialogPanels extends BaseEditor {
   @state() public _selectedGroup: string | null = null;
   @state() private _selectedNotification: string | null = null;
   @state() private _reloadPanelItems: boolean = false;
+  @state() private _selectedItemId: string | null = null;
+  @state() private _search = '';
+  @state() private _showHidden = false;
+  @state() private _creatingItem = false;
+  @state() private _newTitle = '';
+  @state() private _newDestination = '';
+  @state() private _newPlacement: ItemPlacement = { section: 'ungrouped' };
+  private _listScroll = 0;
   @state() private _prevTab: PANEL_AREA | null = null;
 
   @query('so-panel-all') private _panelAll?: SoPanelAll;
@@ -153,45 +162,618 @@ export class SidebarDialogPanels extends BaseEditor {
   }
 
   private _renderLayoutWorkbench(): TemplateResult {
-    if (this._selectedGroup !== null) {
-      return html`
-        <section class="layout-section">
-          <div class="layout-heading">
-            <div><h2>${this._selectedGroup}</h2><p>Choose the items in this group and drag them into order.</p></div>
-          </div>
-          ${this._renderEditGroup()}
-        </section>
-      `;
-    }
+    if (this._creatingItem) return this._renderItemCreation();
+    if (this._selectedItemId) return this._renderItemEditor(this._selectedItemId);
+    if (this._selectedGroup !== null) return this._renderGroupEditor('custom_groups', this._selectedGroup);
+    if (this._selectedBottomGroup !== null) return this._renderGroupEditor('bottom_groups', this._selectedBottomGroup);
 
+    const config = this._sidebarConfig;
+    const defaultPanel = getDefaultPanelUrlPath(this.hass);
+    const groups = Object.entries(config.custom_groups || {});
+    const assigned = new Set(this._dialog.pickedItems);
+    const ungrouped = [...new Set([...this._dialog._initCombiPanels, ...(config.move_settings_from_fixed && this.hass.panels.config ? ['config'] : [])])].filter(
+      (id) => !assigned.has(id) && id !== defaultPanel && (config.move_settings_from_fixed || id !== 'config')
+    );
+    const visibleGroups = groups.filter(
+      ([name, ids]) =>
+        name.toLocaleLowerCase().includes(this._search.toLocaleLowerCase()) || this._visibleItems(ids).length
+    );
+    const groupList = html`<div class="organizer-groups">
+      ${visibleGroups.map(([group, ids]) =>
+        this._renderOrganizerGroup(
+          'custom_groups',
+          group,
+          ids,
+          groups.findIndex(([name]) => name === group)
+        )
+      )}
+    </div>`;
     return html`
-      <div class="layout-workbench">
-        <section class="layout-section">
-          <div class="layout-heading">
-            <div><h2>Sidebar groups</h2><p>Create groups, change their order, then open a group to assign its items.</p></div>
-          </div>
-          ${this._renderCustomGroupList()}
-        </section>
-        <section class="layout-section">
-          <div class="layout-heading">
-            <div><h2>Bottom area</h2><p>Place items or compact groups at the bottom of the sidebar.</p></div>
-          </div>
-          <details class="layout-detail">
-            <summary><span><strong>Bottom items</strong><small>Standard rows shown below the main groups.</small></span></summary>
-            ${this._renderPanelSelector(BOTTOM_SECTION.BOTTOM_ITEMS)}
-          </details>
-          <details class="layout-detail">
-            <summary><span><strong>Bottom grid</strong><small>Compact icon items shown in a grid.</small></span></summary>
-            ${this._renderPanelSelector(BOTTOM_SECTION.BOTTOM_GRID_ITEMS)}
-          </details>
-          <details class="layout-detail" .open=${this._selectedBottomGroup !== null}>
-            <summary><span><strong>Bottom groups</strong><small>Expandable groups kept in the bottom area.</small></span></summary>
-            ${this._renderBottomGroupsList()}
-          </details>
-        </section>
+      <div class="organizer-toolbar">
+        <ha-textfield
+          label="Search items and groups"
+          .value=${this._search}
+          @input=${(event: Event) => {
+            this._search = (event.target as HTMLInputElement).value;
+          }}
+        ></ha-textfield>
+        <ha-formfield label="Show hidden items"
+          ><ha-checkbox
+            .checked=${this._showHidden}
+            @change=${(event: Event) => {
+              this._showHidden = (event.target as HTMLInputElement).checked;
+            }}
+          ></ha-checkbox
+        ></ha-formfield>
       </div>
+      <div class="organizer-add-actions">
+        <ha-button appearance="accent" @click=${() => this._startItemCreation()}>Add item</ha-button>
+        <ha-button appearance="plain" @click=${this._togglePromptNewGroup}>Add group</ha-button>
+      </div>
+      <div class="organizer-list" aria-label="Sidebar items in display order">
+        ${this._visibleItems([defaultPanel]).map((id) => this._renderOrganizerItem(id))}
+        ${!this._search
+          ? html`<ha-sortable handle-selector=".group-drag" @item-moved=${this._groupMoved}>${groupList}</ha-sortable>`
+          : groupList}
+        ${this._visibleItems(ungrouped).map((id) => this._renderOrganizerItem(id))}
+        ${Object.entries(config.bottom_groups || {}).map(([group, ids], index) =>
+          this._renderOrganizerGroup('bottom_groups', group, ids, index)
+        )}
+        ${this._renderFlatSection('bottom_items', 'Bottom items')}
+        ${this._renderFlatSection('bottom_grid_items', 'Bottom grid')}
+        ${!config.move_settings_from_fixed
+          ? this._visibleItems(['config']).map((id) => this._renderOrganizerItem(id))
+          : nothing}
+      </div>
+      ${this._search && !this._dialog._initCombiPanels.some((id) => this._matchesItem(id)) && !visibleGroups.length
+        ? html`<p class="empty-state">No matching items. Try another name or destination.</p>`
+        : nothing}
+      <details class="organizer-extra">
+        <summary>Bottom groups</summary>
+        <p>Keep utility groups above the fixed Settings item.</p>
+        <ha-button appearance="plain" @click=${this._addBottomGroup}>Add bottom group</ha-button>
+      </details>
     `;
   }
+
+  private _visibleItems(ids: string[]): string[] {
+    return ids.filter((id) => (this._showHidden || !this._isItemHidden(id)) && this._matchesItem(id));
+  }
+
+  private _matchesItem(id: string): boolean {
+    const info = this._getPanelInfo(id);
+    return [id, info.title, info.url_path].some((value) =>
+      String(value || '')
+        .toLocaleLowerCase()
+        .includes(this._search.trim().toLocaleLowerCase())
+    );
+  }
+
+  private _isItemHidden(id: string): boolean {
+    return Boolean(
+      this._sidebarConfig.hidden_items?.includes(id) ||
+      this._sidebarConfig.new_items?.some((item) => item.title === id && item.show_in_sidebar === false)
+    );
+  }
+
+  private _renderOrganizerGroup(
+    section: 'custom_groups' | 'bottom_groups',
+    group: string,
+    ids: string[],
+    index: number
+  ): TemplateResult {
+    if (section === 'custom_groups' && group === PANEL_TYPE.UNCATEGORIZED_ITEMS)
+      return html`${this._visibleItems(ids).map((id) => this._renderOrganizerItem(id))}`;
+    const groups = Object.keys(this._sidebarConfig[section] || {});
+    return html`<section class="organizer-group" data-group=${group}>
+      <div class="organizer-group-heading">
+        ${section === 'custom_groups' && !this._search
+          ? html`<ha-icon-button class="group-drag" .label=${`Drag ${group} group`} .path=${mdiDrag}></ha-icon-button>`
+          : nothing}
+        <button class="group-open" @click=${() => this._selectGroup(section, group)}>
+          <strong>${group}</strong
+          ><small
+            >${ids.length}
+            ${ids.length === 1 ? 'item' : 'items'}${section === 'bottom_groups'
+              ? ' · Bottom group'
+              : ''}${this._isGroupCollapsed(group) ? ' · Starts collapsed' : ''}${this._isGroupPinned(group)
+              ? ' · Pinned'
+              : ''}</small
+          >
+        </button>
+        <ha-icon-button
+          .label=${`Move ${group} group up`}
+          .path=${mdiChevronUp}
+          .disabled=${index === 0}
+          @click=${() => this._moveOrganizerGroup(section, index, index - 1)}
+        ></ha-icon-button>
+        <ha-icon-button
+          .label=${`Move ${group} group down`}
+          .path=${mdiChevronDown}
+          .disabled=${index === groups.length - 1}
+          @click=${() => this._moveOrganizerGroup(section, index, index + 1)}
+        ></ha-icon-button>
+      </div>
+      <div class="organizer-group-items">
+        ${this._visibleItems(ids).map((id) => this._renderOrganizerItem(id))}${!ids.length
+          ? html`<button class="empty-group" @click=${() => this._selectGroup(section, group)}>
+              Add items to this group
+            </button>`
+          : nothing}
+      </div>
+    </section>`;
+  }
+
+  private _renderFlatSection(
+    section: 'bottom_items' | 'bottom_grid_items',
+    title: string
+  ): TemplateResult | typeof nothing {
+    const ids = this._visibleItems(this._sidebarConfig[section] || []);
+    return ids.length
+      ? html`<section class="organizer-group">
+          <h2 class="flat-heading">${title}</h2>
+          ${ids.map((id) => this._renderOrganizerItem(id))}
+        </section>`
+      : nothing;
+  }
+
+  private _renderOrganizerItem(id: string, index?: number, placement?: ItemPlacement): TemplateResult {
+    const info = this._getPanelInfo(id);
+    const hidden = this._isItemHidden(id);
+    const notification = collectNotificationSettings(this._sidebarConfig)[id];
+    const rule = this._sidebarConfig.visibility_templates?.items?.[id];
+    const items = placement ? this._placementItems(placement) : [];
+    return html`<div class="organizer-item" data-item=${id}>
+      ${placement
+        ? html`<ha-icon-button class="item-drag" .label=${`Drag ${info.title}`} .path=${mdiDrag}></ha-icon-button>`
+        : nothing}
+      <button class="item-open" @click=${() => this.selectItem(id)}>
+        <ha-icon icon=${info.icon || 'mdi:view-dashboard-outline'}></ha-icon
+        ><span
+          ><strong>${info.title || id}</strong
+          ><small
+            >${info.url_path || id}${hidden ? ' · Hidden' : ''}${notification ? ' · Badge' : ''}${rule
+              ? ' · Conditional'
+              : ''}</small
+          ></span
+        >
+      </button>
+      ${placement
+        ? html`<ha-icon-button
+              .label=${`Move ${info.title} up`}
+              .path=${mdiChevronUp}
+              .disabled=${index === 0}
+              @click=${() => this._moveOrganizerItem(placement, index!, index! - 1)}
+            ></ha-icon-button
+            ><ha-icon-button
+              .label=${`Move ${info.title} down`}
+              .path=${mdiChevronDown}
+              .disabled=${index === items.length - 1}
+              @click=${() => this._moveOrganizerItem(placement, index!, index! + 1)}
+            ></ha-icon-button>`
+        : nothing}
+    </div>`;
+  }
+
+  private _placementOptions(): { label: string; placement: ItemPlacement }[] {
+    return [
+      { label: 'Main area · Ungrouped', placement: { section: 'ungrouped' } },
+      ...Object.keys(this._sidebarConfig.custom_groups || {})
+        .filter((group) => group !== PANEL_TYPE.UNCATEGORIZED_ITEMS)
+        .map((group) => ({ label: group, placement: { section: 'custom_groups' as const, group } })),
+      ...Object.keys(this._sidebarConfig.bottom_groups || {}).map((group) => ({
+        label: `${group} · Bottom group`,
+        placement: { section: 'bottom_groups' as const, group },
+      })),
+      { label: 'Bottom items', placement: { section: 'bottom_items' } },
+      { label: 'Bottom grid', placement: { section: 'bottom_grid_items' } },
+    ];
+  }
+
+  private _renderPlacementSelect(value: ItemPlacement, change: (placement: ItemPlacement) => void): TemplateResult {
+    return html`<label class="placement-field"
+      ><span>Placement</span
+      ><select
+        aria-label="Item placement"
+        @change=${(event: Event) => change(JSON.parse((event.target as HTMLSelectElement).value) as ItemPlacement)}
+      >
+        ${this._placementOptions().map(
+          (option) =>
+            html`<option
+              value=${JSON.stringify(option.placement)}
+              ?selected=${JSON.stringify(option.placement) === JSON.stringify(value)}
+            >
+              ${option.label}
+            </option>`
+        )}
+      </select></label
+    >`;
+  }
+
+  private _renderItemEditor(id: string): TemplateResult {
+    const info = this._getPanelInfo(id);
+    const custom = this._sidebarConfig.new_items?.some((item) => item.title === id);
+    const placement = getItemPlacement(this._sidebarConfig, id);
+    const fixed =
+      id === getDefaultPanelUrlPath(this.hass) || (id === 'config' && !this._sidebarConfig.move_settings_from_fixed);
+    const groupRule = placement.group && this._sidebarConfig.visibility_templates?.groups?.[placement.group];
+    const notification = collectNotificationSettings(this._sidebarConfig)[id] || '';
+    return html`
+      ${this._renderBackButton()}
+      <div class="detail-heading">
+        <h2 tabindex="-1">${info.title || id}</h2>
+        <ha-button appearance="plain" @click=${() => this._dialog.showPreview(placement.group, id)}
+          >Show in preview</ha-button
+        >
+      </div>
+      ${fixed
+        ? html`<p class="field-help">Home Assistant keeps this item fixed.</p>`
+        : this._renderPlacementSelect(placement, (next) => this._moveTo(id, next))}
+      <ha-formfield label="Show in sidebar"
+        ><ha-switch
+          .checked=${!this._isItemHidden(id)}
+          .disabled=${id === getDefaultPanelUrlPath(this.hass)}
+          @change=${(event: Event) => this._setItemVisible(id, (event.target as HTMLInputElement).checked)}
+        ></ha-switch
+      ></ha-formfield>
+      ${!fixed && placement.section !== 'ungrouped'
+        ? html`<div class="item-order-actions">
+            <span
+              >Order in
+              ${placement.group || (placement.section === 'bottom_items' ? 'bottom items' : 'bottom grid')}</span
+            ><ha-button
+              appearance="plain"
+              .disabled=${this._placementItems(placement).indexOf(id) <= 0}
+              @click=${() =>
+                this._moveOrganizerItem(
+                  placement,
+                  this._placementItems(placement).indexOf(id),
+                  this._placementItems(placement).indexOf(id) - 1
+                )}
+              >Move up</ha-button
+            ><ha-button
+              appearance="plain"
+              .disabled=${this._placementItems(placement).indexOf(id) >= this._placementItems(placement).length - 1}
+              @click=${() =>
+                this._moveOrganizerItem(
+                  placement,
+                  this._placementItems(placement).indexOf(id),
+                  this._placementItems(placement).indexOf(id) + 1
+                )}
+              >Move down</ha-button
+            >
+          </div>`
+        : nothing}
+      ${custom
+        ? html`<sidebar-dialog-new-items
+            embedded
+            .itemTitle=${id}
+            .hass=${this.hass}
+            ._store=${this._store}
+            ._sidebarConfig=${this._sidebarConfig}
+            @item-renamed=${(event: CustomEvent) => {
+              this._selectedItemId = event.detail.title;
+            }}
+            @item-deleted=${this._backToList}
+          ></sidebar-dialog-new-items>`
+        : html`<p class="field-help">Destination: ${info.url_path || id}</p>`}
+      <details class="organizer-extra">
+        <summary>Badge and conditional visibility</summary>
+        <ha-selector
+          label="Notification badge"
+          .hass=${this.hass}
+          .selector=${{ template: { preview: true } }}
+          .value=${notification}
+          @value-changed=${(event: CustomEvent) => {
+            event.stopPropagation();
+            this._setNotificationSetting(id, event.detail.value || undefined);
+          }}
+        ></ha-selector>
+        ${groupRule
+          ? html`<p class="field-help">
+              This group has a visibility rule. The group rule takes priority over the item rule.
+            </p>`
+          : nothing}
+        <ha-selector
+          label="Show when"
+          .hass=${this.hass}
+          .selector=${{ template: { preview: true } }}
+          .value=${this._sidebarConfig.visibility_templates?.items?.[id] || ''}
+          @value-changed=${(event: CustomEvent) => {
+            event.stopPropagation();
+            this._setVisibilityRule('items', id, event.detail.value);
+          }}
+        ></ha-selector>
+      </details>
+    `;
+  }
+
+  private _renderGroupEditor(section: 'custom_groups' | 'bottom_groups', group: string): TemplateResult {
+    const placement: ItemPlacement = { section, group };
+    const ids = this._placementItems(placement);
+    const defaultPanel = getDefaultPanelUrlPath(this.hass);
+    const candidates = this._dialog._initCombiPanels.filter(
+      (id) =>
+        !ids.includes(id) && id !== defaultPanel && (this._sidebarConfig.move_settings_from_fixed || id !== 'config')
+    );
+    return html`
+      ${this._renderBackButton()}
+      <div class="detail-heading">
+        <h2 tabindex="-1">${group}</h2>
+        <ha-button appearance="plain" @click=${() => this._dialog.showPreview(group)}>Show in preview</ha-button>
+      </div>
+      <div class="group-settings">
+        <ha-formfield label="Start collapsed"
+          ><ha-checkbox
+            .checked=${this._isGroupCollapsed(group)}
+            @change=${() => this._handleGroupAction('collapsed-group', group)}
+          ></ha-checkbox
+        ></ha-formfield>
+        ${section === 'custom_groups' ? this._renderPinGroupForms(group) : nothing}
+      </div>
+      <ha-sortable
+        handle-selector=".item-drag"
+        .configValue=${section}
+        .customGroup=${group}
+        @item-moved=${this._itemMoved}
+        ><div class="group-editor-items">
+          ${ids.map((id, index) => this._renderOrganizerItem(id, index, placement))}
+        </div></ha-sortable
+      >
+      ${!ids.length
+        ? html`<p class="empty-state">This group is empty. Add an existing item or create a link.</p>`
+        : nothing}
+      <ha-selector
+        label="Add or move an item"
+        .hass=${this.hass}
+        .selector=${{
+          select: {
+            mode: 'dropdown',
+            options: candidates.map((id) => ({
+              value: id,
+              label: `${this._getPanelInfo(id).title || id} · ${this._getPanelInfo(id).url_path || id}`,
+            })),
+          },
+        }}
+        .value=${''}
+        @value-changed=${(event: CustomEvent) => {
+          event.stopPropagation();
+          if (event.detail.value) this._moveTo(event.detail.value, placement);
+        }}
+      ></ha-selector>
+      <ha-button appearance="plain" @click=${() => this._startItemCreation(placement)}
+        >Create new item in this group</ha-button
+      >
+      <details class="organizer-extra">
+        <summary>Group options</summary>
+        <ha-selector
+          label="Show group when"
+          .hass=${this.hass}
+          .selector=${{ template: { preview: true } }}
+          .value=${this._sidebarConfig.visibility_templates?.groups?.[group] || ''}
+          @value-changed=${(event: CustomEvent) => {
+            event.stopPropagation();
+            this._setVisibilityRule('groups', group, event.detail.value);
+          }}
+        ></ha-selector>
+        ${section === 'custom_groups'
+          ? html`<ha-button appearance="plain" @click=${() => this._handleGroupAction('rename', group)}
+                >Rename group</ha-button
+              ><ha-button
+                appearance="plain"
+                destructive
+                @click=${async () => {
+                  await this._handleGroupAction('delete', group);
+                  if (!Object.hasOwn(this._sidebarConfig.custom_groups || {}, group)) this._backToList();
+                }}
+                >Delete group</ha-button
+              >`
+          : html`<ha-button appearance="plain" destructive @click=${() => this._deleteBottomGroup(group)}
+              >Delete group</ha-button
+            >`}
+      </details>
+    `;
+  }
+
+  private _renderItemCreation(): TemplateResult {
+    return html`${this._renderBackButton()}
+      <h2 tabindex="-1">Add item</h2>
+      <ha-textfield
+        label="Item name"
+        .value=${this._newTitle}
+        @input=${(event: Event) => {
+          this._newTitle = (event.target as HTMLInputElement).value;
+        }}
+      ></ha-textfield>
+      <ha-textfield
+        label="Destination"
+        .value=${this._newDestination}
+        helper="Home Assistant path or full URL. Leave blank for an action."
+        @input=${(event: Event) => {
+          this._newDestination = (event.target as HTMLInputElement).value;
+        }}
+      ></ha-textfield>
+      ${this._renderPlacementSelect(this._newPlacement, (placement) => {
+        this._newPlacement = placement;
+      })}
+      ${this._sidebarConfig.new_items?.some((item) => item.title === this._newTitle.trim()) ||
+      Object.hasOwn(this.hass.panels || {}, this._newTitle.trim())
+        ? html`<p role="alert">An item with this name already exists.</p>`
+        : nothing}
+      <ha-button
+        appearance="accent"
+        .disabled=${!this._newTitle.trim() ||
+        this._sidebarConfig.new_items?.some((item) => item.title === this._newTitle.trim()) ||
+        Object.hasOwn(this.hass.panels || {}, this._newTitle.trim())}
+        @click=${this._createItem}
+        >Add to sidebar</ha-button
+      >`;
+  }
+
+  private _placementItems(placement: ItemPlacement): string[] {
+    if (placement.section === 'custom_groups' || placement.section === 'bottom_groups')
+      return this._sidebarConfig[placement.section]?.[placement.group!] || [];
+    return placement.section === 'ungrouped' ? [] : this._sidebarConfig[placement.section] || [];
+  }
+
+  private _moveTo(id: string, placement: ItemPlacement): void {
+    this._sidebarConfig = moveItemToPlacement(this._sidebarConfig, id, placement);
+    this._dispatchConfig(this._sidebarConfig);
+    void this._dialog.updateComplete.then(() => this._dialog._dialogPreview?.revealItem(id));
+  }
+
+  private _moveOrganizerItem(placement: ItemPlacement, oldIndex: number, newIndex: number): void {
+    const ids = this._placementItems(placement);
+    if (newIndex < 0 || newIndex >= ids.length) return;
+    const items = [...ids];
+    items.splice(newIndex, 0, items.splice(oldIndex, 1)[0]);
+    this._sidebarConfig =
+      placement.section === 'custom_groups' || placement.section === 'bottom_groups'
+        ? {
+            ...this._sidebarConfig,
+            [placement.section]: { ...this._sidebarConfig[placement.section], [placement.group!]: items },
+          }
+        : { ...this._sidebarConfig, [placement.section]: items };
+    this._dispatchConfig(this._sidebarConfig);
+  }
+
+  private _moveOrganizerGroup(section: 'custom_groups' | 'bottom_groups', oldIndex: number, newIndex: number): void {
+    const groups = Object.entries(this._sidebarConfig[section] || {});
+    if (newIndex < 0 || newIndex >= groups.length) return;
+    groups.splice(newIndex, 0, groups.splice(oldIndex, 1)[0]);
+    this._sidebarConfig = { ...this._sidebarConfig, [section]: Object.fromEntries(groups) };
+    this._dispatchConfig(this._sidebarConfig);
+  }
+
+  private _setItemVisible(id: string, visible: boolean): void {
+    const hidden = (this._sidebarConfig.hidden_items || []).filter((item) => item !== id);
+    const customIndex = this._sidebarConfig.new_items?.findIndex((item) => item.title === id) ?? -1;
+    this._sidebarConfig = {
+      ...this._sidebarConfig,
+      hidden_items: visible || customIndex >= 0 ? hidden : [...hidden, id],
+    };
+    if (customIndex >= 0)
+      this._sidebarConfig = {
+        ...this._sidebarConfig,
+        new_items: this._sidebarConfig.new_items!.map((item, index) =>
+          index === customIndex ? { ...item, show_in_sidebar: visible } : item
+        ),
+      };
+    this._dispatchConfig(this._sidebarConfig);
+  }
+
+  private _setVisibilityRule(type: 'items' | 'groups', id: string, value: string): void {
+    const rules = { ...this._sidebarConfig.visibility_templates?.[type] };
+    if (value) rules[id] = value;
+    else delete rules[id];
+    this._sidebarConfig = {
+      ...this._sidebarConfig,
+      visibility_templates: { ...this._sidebarConfig.visibility_templates, [type]: rules },
+    };
+    this._dispatchConfig(this._sidebarConfig);
+  }
+
+  public selectItem(id: string): void {
+    this._rememberListPosition();
+    this._selectedItemId = id;
+    this._selectedGroup = null;
+    this._selectedBottomGroup = null;
+    void this._dialog._dialogPreview?.revealItem(id);
+    this._focusDetail();
+  }
+
+  public revealIssue(path: Array<string | number>): void {
+    const [section, key, index] = path;
+    if (section === 'new_items' && typeof key === 'number') {
+      const title = this._sidebarConfig.new_items?.[key]?.title;
+      if (title) this.selectItem(title);
+    } else if ((section === 'custom_groups' || section === 'bottom_groups') && typeof key === 'string') {
+      const id = typeof index === 'number' ? this._sidebarConfig[section]?.[key]?.[index] : undefined;
+      if (id) this.selectItem(id);
+      else this._selectGroup(section, key);
+    } else if (
+      (section === 'bottom_items' || section === 'bottom_grid_items' || section === 'hidden_items') &&
+      typeof key === 'number'
+    ) {
+      const id = this._sidebarConfig[section]?.[key];
+      if (id) this.selectItem(id);
+    }
+  }
+
+  private _selectGroup(section: 'custom_groups' | 'bottom_groups', group: string): void {
+    this._rememberListPosition();
+    this._selectedItemId = null;
+    this._selectedGroup = section === 'custom_groups' ? group : null;
+    this._selectedBottomGroup = section === 'bottom_groups' ? group : null;
+    this._focusDetail();
+  }
+
+  private _startItemCreation(placement: ItemPlacement = { section: 'ungrouped' }): void {
+    this._rememberListPosition();
+    this._newPlacement = placement;
+    this._creatingItem = true;
+    this._newTitle = '';
+    this._newDestination = '';
+    this._focusDetail();
+  }
+
+  private _createItem = (): void => {
+    const title = this._newTitle.trim();
+    if (
+      !title ||
+      this._sidebarConfig.new_items?.some((item) => item.title === title) ||
+      Object.hasOwn(this.hass.panels || {}, title)
+    )
+      return;
+    const config = {
+      ...this._sidebarConfig,
+      new_items: [
+        ...(this._sidebarConfig.new_items || []),
+        { title, icon: 'mdi:link', ...(this._newDestination.trim() ? { url_path: this._newDestination.trim() } : {}) },
+      ],
+    };
+    this._sidebarConfig = moveItemToPlacement(config, title, this._newPlacement);
+    this._dispatchConfig(this._sidebarConfig);
+    this._creatingItem = false;
+    this.selectItem(title);
+  };
+
+  private _renderBackButton(): TemplateResult {
+    return html`<ha-button appearance="plain" class="back-to-list" @click=${this._backToList}
+      ><ha-icon slot="start" icon="mdi:arrow-left"></ha-icon>Back to sidebar</ha-button
+    >`;
+  }
+
+  private _rememberListPosition(): void {
+    if (
+      !this._selectedItemId &&
+      this._selectedGroup === null &&
+      this._selectedBottomGroup === null &&
+      !this._creatingItem
+    )
+      this._listScroll = this._dialog.shadowRoot?.querySelector('.editor-canvas')?.scrollTop || 0;
+  }
+
+  private _focusDetail(): void {
+    void this.updateComplete.then(() => {
+      const canvas = this._dialog.shadowRoot?.querySelector('.editor-canvas');
+      if (canvas) canvas.scrollTop = 0;
+      this.shadowRoot?.querySelector<HTMLElement>('h2[tabindex]')?.focus();
+    });
+  }
+
+  private _backToList = (): void => {
+    this._selectedItemId = null;
+    this._selectedGroup = null;
+    this._selectedBottomGroup = null;
+    this._creatingItem = false;
+    this._dialog._dialogPreview?._hightlightItem(null);
+    void this.updateComplete.then(() => {
+      const canvas = this._dialog.shadowRoot?.querySelector('.editor-canvas');
+      if (canvas) canvas.scrollTop = this._listScroll;
+      this.shadowRoot?.querySelector<HTMLElement>('ha-textfield')?.focus();
+    });
+  };
 
   private _renderAllItems() {
     return html`
@@ -358,7 +940,7 @@ export class SidebarDialogPanels extends BaseEditor {
       ];
 
       return html`<ha-dropdown @wa-select=${this._handleSubItemAction}>
-        <ha-icon-button slot="trigger" .path=${mdiDotsVertical} hide-title></ha-icon-button>
+        <ha-icon-button slot="trigger" .label=${`Actions for ${key}`} .path=${mdiDotsVertical}></ha-icon-button>
 
         ${uncategorizedActions.map(
           (action) => html`
@@ -389,7 +971,7 @@ export class SidebarDialogPanels extends BaseEditor {
     const pinned = this._isGroupPinned(key);
 
     return html`
-      ${!isMobile
+      ${!isMobile && !this.workbenchMode
         ? html`
             <ha-icon-button
               class="action-btn"
@@ -412,7 +994,7 @@ export class SidebarDialogPanels extends BaseEditor {
         : null}
 
       <ha-dropdown @wa-select=${this._handleSubItemAction}>
-        <ha-icon-button slot="trigger" .path=${mdiDotsVertical} hide-title></ha-icon-button>
+        <ha-icon-button slot="trigger" .label=${`Actions for ${key}`} .path=${mdiDotsVertical}></ha-icon-button>
 
         ${actions.map(
           (action) => html`
@@ -445,17 +1027,17 @@ export class SidebarDialogPanels extends BaseEditor {
     return html`
       <div class="group-item-row" data-group=${key} data-index=${index}>
         <div class="handle">
-          <ha-icon-button .path=${mdiDrag}></ha-icon-button>
+          <ha-icon-button .label=${`Drag ${key} group`} .path=${mdiDrag}></ha-icon-button>
         </div>
 
-        <div class="group-name" @click=${() => this._handleGroupAction('edit-items', key, PANEL_AREA.CUSTOM_GROUPS)}>
+        <button class="group-name" @click=${() => this._handleGroupAction('edit-items', key, PANEL_AREA.CUSTOM_GROUPS)}>
           <ha-icon icon=${`mdi:numeric-${index + 1}-box`}></ha-icon>
 
           <div class="group-name-items" style="text-transform: ${textTransform}">
             ${key}
             <span>${itemCount} ${itemCount > 1 ? 'items' : 'item'}</span>
           </div>
-        </div>
+        </button>
 
         <div class="group-actions">${this._renderGroupActions(key, isUncategorized)}</div>
         <ha-icon-button
@@ -647,7 +1229,7 @@ export class SidebarDialogPanels extends BaseEditor {
           updates.visibility_templates = { ...this._sidebarConfig.visibility_templates, groups: visibilityGroups };
         }
         updateSidebarConfig(updates);
-
+        if (this._selectedGroup === key) this._selectedGroup = newName;
         break;
       case 'collapsed-group':
         if (defaultCollapsed.includes(key)) {
@@ -682,10 +1264,10 @@ export class SidebarDialogPanels extends BaseEditor {
         updateSidebarConfig(updates);
         break;
       case 'preview':
-        this._dialog._dialogPreview._toggleGroup(key, 'show');
+        this._dialog.showPreview(key);
         break;
       case 'preview-item':
-        this._dialog._dialogPreview._toggleGroup(key);
+        this._dialog.showPreview(key);
         break;
       case 'uncategorized-as-group':
         const uncategorized_items = this._sidebarConfig?.uncategorized_items ?? false;
@@ -716,16 +1298,13 @@ export class SidebarDialogPanels extends BaseEditor {
     if (!this._selectedGroup) return nothing;
     const headerBack = html`<div class="header-row ">
       <ha-icon-button
+        .label=${'Back to groups'}
         .path=${mdiChevronLeft}
         @click=${() => ((this._selectedGroup = null), (this._selectedTab = this._prevTab || PANEL_AREA.ALL_ITEMS))}
       >
       </ha-icon-button>
       ${this._selectedGroup.toLocaleUpperCase()}
-      <ha-button
-        appearance="plain"
-        size="s"
-        @click=${() => this._handleGroupAction('preview', this._selectedGroup!)}
-      >
+      <ha-button appearance="plain" size="s" @click=${() => this._handleGroupAction('preview', this._selectedGroup!)}>
         PREVIEW
       </ha-button>
     </div>`;
@@ -854,9 +1433,9 @@ export class SidebarDialogPanels extends BaseEditor {
 
     const isBottomGroup = configValue === BOTTOM_SECTION.BOTTOM_GROUPS;
     const configItems = customGroup
-      ? (isBottomGroup
-          ? this._sidebarConfig.bottom_groups?.[customGroup] || []
-          : this._sidebarConfig.custom_groups![customGroup] || [])
+      ? isBottomGroup
+        ? this._sidebarConfig.bottom_groups?.[customGroup] || []
+        : this._sidebarConfig.custom_groups![customGroup] || []
       : this._sidebarConfig[configValue as keyof SidebarConfig] || [];
 
     const selectedItems = Object.entries(configItems).map(([, item]) => item);
@@ -980,7 +1559,11 @@ export class SidebarDialogPanels extends BaseEditor {
     return html`
       <div class="header-row flex-icon">
         <span>GROUP: ${typeTitle} - ORDER </span>
-        <ha-icon-button .path=${mdiSortAlphabeticalVariant} @click=${() => this._sortItems(selectedType, configValue)}>
+        <ha-icon-button
+          .label=${'Sort items alphabetically'}
+          .path=${mdiSortAlphabeticalVariant}
+          @click=${() => this._sortItems(selectedType, configValue)}
+        >
         </ha-icon-button>
       </div>
 
@@ -1272,6 +1855,10 @@ export class SidebarDialogPanels extends BaseEditor {
   }
 
   public clickedPanelInPreview(panel: string, group?: string | null): void {
+    if (this.workbenchMode === 'layout') {
+      this.selectItem(panel);
+      return;
+    }
     console.log('Clicked panel in preview:', panel, group);
     if (group) {
       if (group === BOTTOM_SECTION.BOTTOM_GRID_ITEMS || group === BOTTOM_SECTION.BOTTOM_ITEMS) {
@@ -1310,6 +1897,206 @@ export class SidebarDialogPanels extends BaseEditor {
           max-height: none;
           overflow: visible;
         }
+
+        button {
+          font: inherit;
+          color: var(--primary-text-color);
+          background: transparent;
+          border: 0;
+          cursor: pointer;
+          text-align: start;
+        }
+        button:focus-visible,
+        select:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
+        }
+        h2[tabindex]:focus {
+          outline: none;
+        }
+        .organizer-toolbar {
+          display: grid;
+          gap: 8px;
+        }
+        .organizer-toolbar ha-textfield {
+          width: 100%;
+        }
+        .organizer-add-actions {
+          display: flex;
+          gap: 8px;
+          margin: 12px 0;
+        }
+        .organizer-group {
+          border-block: 1px solid var(--divider-color);
+          margin-block: 8px;
+        }
+        .organizer-group-heading,
+        .organizer-item {
+          align-items: center;
+          display: flex;
+          min-width: 0;
+          --mdc-icon-button-size: 40px;
+        }
+        .organizer-group-heading {
+          background: var(--secondary-background-color);
+        }
+        .group-open {
+          display: grid;
+          flex: 1;
+          gap: 3px;
+          min-height: 56px;
+          padding: 8px 10px;
+          min-width: 0;
+        }
+        .group-open small,
+        .item-open small,
+        .field-help,
+        .organizer-extra p {
+          color: var(--secondary-text-color);
+          font-size: 0.8rem;
+          line-height: 1.4;
+        }
+        .organizer-group-items {
+          padding-inline-start: 12px;
+        }
+        .organizer-item + .organizer-item {
+          border-block-start: 1px solid var(--divider-color);
+        }
+        .item-open {
+          display: flex;
+          align-items: center;
+          flex: 1;
+          gap: 12px;
+          min-height: 58px;
+          min-width: 0;
+          padding: 8px 10px;
+        }
+        .item-open > span {
+          display: grid;
+          gap: 3px;
+          min-width: 0;
+        }
+        .item-open strong {
+          font-weight: 400;
+        }
+        .item-open small,
+        .group-open strong {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .item-open ha-icon {
+          flex-shrink: 0;
+          color: var(--secondary-text-color);
+        }
+        .item-open:hover,
+        .group-open:hover,
+        .empty-group:hover {
+          background: var(--secondary-background-color);
+        }
+        .flat-heading {
+          font-size: 0.9rem;
+          margin: 0;
+          padding: 12px;
+        }
+        .empty-group {
+          min-height: 48px;
+          padding: 12px;
+          color: var(--primary-color);
+          width: 100%;
+        }
+        .detail-heading {
+          align-items: center;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: space-between;
+        }
+        .detail-heading h2 {
+          font-size: 1.2rem;
+          margin: 12px 0;
+        }
+        .placement-field {
+          display: grid;
+          gap: 6px;
+          margin: 12px 0;
+        }
+        .placement-field span {
+          font-size: 0.85rem;
+          color: var(--secondary-text-color);
+        }
+        .placement-field select {
+          appearance: auto;
+          width: 100%;
+          box-sizing: border-box;
+          background: var(--secondary-background-color);
+          color: var(--primary-text-color);
+          border: 0;
+          border-bottom: 1px solid var(--secondary-text-color);
+          border-radius: 4px 4px 0 0;
+          font: inherit;
+          min-height: 48px;
+          padding: 10px;
+        }
+        .item-order-actions {
+          align-items: center;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-block: 14px;
+        }
+        .item-order-actions > span {
+          flex-basis: 100%;
+          color: var(--secondary-text-color);
+          font-size: 0.85rem;
+        }
+        .organizer-extra {
+          border-block-start: 1px solid var(--divider-color);
+          margin-block: 18px;
+          padding-block-start: 8px;
+        }
+        .organizer-extra summary {
+          cursor: pointer;
+          min-height: 44px;
+          display: flex;
+          align-items: center;
+          color: var(--primary-color);
+        }
+        .organizer-extra summary::before {
+          content: '▸';
+          margin-inline-end: 8px;
+        }
+        .organizer-extra[open] summary::before {
+          content: '▾';
+        }
+        .organizer-extra ha-selector {
+          display: block;
+          margin-block: 12px;
+        }
+        .group-editor-items {
+          margin-block: 14px;
+        }
+        .back-to-list {
+          margin-inline-start: -10px;
+        }
+        :host([workbench-mode='layout']) > ha-textfield {
+          width: 100%;
+          display: block;
+          margin-block: 16px;
+        }
+        @media (max-width: 600px) {
+          .organizer-item,
+          .organizer-group-heading {
+            --mdc-icon-button-size: 44px;
+          }
+          .organizer-group-items {
+            padding-inline-start: 0;
+          }
+          .group-editor-items .item-open {
+            gap: 6px;
+            padding-inline: 0;
+          }
+        }
         .rules-layout {
           display: grid;
           gap: 28px;
@@ -1335,7 +2122,7 @@ export class SidebarDialogPanels extends BaseEditor {
         }
         .layout-heading p {
           color: var(--secondary-text-color);
-          font-size: .9rem;
+          font-size: 0.9rem;
           line-height: 1.4;
           margin-top: 4px;
         }
@@ -1355,7 +2142,7 @@ export class SidebarDialogPanels extends BaseEditor {
         }
         .layout-detail summary small {
           color: var(--secondary-text-color);
-          font-size: .82rem;
+          font-size: 0.82rem;
           font-weight: 400;
         }
         .layout-detail[open] summary {
@@ -1376,7 +2163,7 @@ export class SidebarDialogPanels extends BaseEditor {
         }
         .rule-heading p {
           color: var(--secondary-text-color);
-          font-size: .9rem;
+          font-size: 0.9rem;
           line-height: 1.4;
           margin-top: 4px;
         }

@@ -63,7 +63,7 @@ export class EditorSessionController {
     this.baselineConfig = structuredClone(options.config);
     this.rawYaml = options.rawYaml?.trim() ? options.rawYaml : YAML.stringify(options.config);
     this.baselineRawYaml = this.rawYaml;
-    this.activeRoute = options.activeRoute || 'sidebar';
+    this.activeRoute = options.activeRoute || 'organize';
     this.document = YamlConfigDocument.parse(this.rawYaml);
     this.drafts = options.draftStorage || new EditorDraftStorage();
     this.draftDebounceMs = options.draftDebounceMs ?? 500;

@@ -22,7 +22,13 @@ import { styleMap } from 'lit/directives/style-map.js';
 import tinycolor from 'tinycolor2';
 
 import { BaseEditor } from '../base-editor';
-import { BASE_APPEARANCE_SCHEMA, CUSTOM_THEME_SCHEMA } from './forms';
+import {
+  APPEARANCE_SECTIONS,
+  appearanceConfigData,
+  appearanceFormData,
+  CUSTOM_THEME_SCHEMA,
+  THEME_APPEARANCE_SCHEMA,
+} from './forms';
 
 enum THEME_STATE {
   LOADING = 1,
@@ -275,16 +281,17 @@ export class SidebarDialogColors extends BaseEditor {
     const DATA = pick(config, [...AppearanceConfigKeys]) as SidebarAppearanceConfig;
     return html`
       <div id="theme-container" style="display: none;"></div>
-      <section class="appearance-section general-section">
-        <div class="section-heading">
-          <ha-icon icon="mdi:format-text"></ha-icon>
-          <div>
-            <h2>General</h2>
-            <p>Title, group behaviour and sidebar dimensions.</p>
-          </div>
-        </div>
-        ${createHaForm(this, BASE_APPEARANCE_SCHEMA(DATA), DATA, { configKey: 'appearance' })}
-      </section>
+      ${APPEARANCE_SECTIONS(DATA).map(
+        (section, index) => html`
+          <section class="appearance-section ${index === 0 ? 'general-section' : ''}">
+            <div class="section-heading">
+              <ha-icon .icon=${section.icon}></ha-icon>
+              <h2>${section.title}</h2>
+            </div>
+            ${createHaForm(this, section.schema, appearanceFormData(DATA), { configKey: 'appearance' })}
+          </section>
+        `
+      )}
       <div class="color-container">${this._renderColorConfigFields()}</div>
     `;
   }
@@ -293,13 +300,15 @@ export class SidebarDialogColors extends BaseEditor {
     return html`
       <div class="color-item">
         <div class="header-row">
-          <ha-icon
+          <ha-icon-button
             ?hidden=${this._sidebarConfig?.color_config?.border_radius === undefined}
-            icon="mdi:refresh"
+            .path=${mdiRefresh}
+            .label=${'Reset border radius'}
+            aria-label="Reset border radius"
             @click=${() => this._resetColorConfig('border_radius')}
-          ></ha-icon>
+          ></ha-icon-button>
           ${this._createPicker({
-            label: 'Border Radius (px)',
+            label: 'Border radius (px)',
             value: this._sidebarConfig?.color_config?.border_radius || '',
             placeHolder: 0,
             configValue: 'border_radius',
@@ -333,7 +342,7 @@ export class SidebarDialogColors extends BaseEditor {
         variant="warning"
         .disabled=${!hasChanged}
         @click=${() => this._resetColorConfig('currentMode')}
-        >RESET ALL</ha-button
+        >Reset mode overrides</ha-button
       >
     </div> `;
 
@@ -342,13 +351,13 @@ export class SidebarDialogColors extends BaseEditor {
         >Reset</ha-button
       >
       <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('cancel')}>Cancel</ha-button>
-      <ha-button appearance="outlined" size="s" @click=${() => this._handleColorPicker('save')}>Save</ha-button>
+      <ha-button appearance="outlined" size="s" @click=${() => this._handleColorPicker('done')}>Done</ha-button>
     </div>`;
 
     const colorConfigContent = html`
       <div class="config-colors grid">
         ${COLOR_CONFIG_KEYS.map((item) => this._renderDividerColor(item.value, item.label))}
-        ${this._renderBorderRadiusField()} ${this._renderCustomStylesField()}
+        ${this._renderBorderRadiusField()}
       </div>
       <div class="picker-wrapper" hidden>
         <div id="picker"></div>
@@ -360,14 +369,24 @@ export class SidebarDialogColors extends BaseEditor {
       content: colorConfigContent,
       options: {
         expanded: false,
-        header: 'Custom colors and styles',
+        header: 'Custom colours',
         darkBg: true,
       },
     });
 
     const content = html`
       <div>${themeSelect} ${headerInfo}</div>
+      ${createHaForm(
+        this,
+        THEME_APPEARANCE_SCHEMA(),
+        appearanceFormData(pick(this._sidebarConfig, AppearanceConfigKeys)),
+        { configKey: 'appearance' }
+      )}
       ${colorConfig}
+      ${createExpansionPanel({
+        content: this._renderCustomStylesField(),
+        options: { expanded: false, header: 'Advanced CSS styles', darkBg: true },
+      })}
     `;
 
     return html`
@@ -375,8 +394,8 @@ export class SidebarDialogColors extends BaseEditor {
         <div class="section-heading">
           <ha-icon icon="mdi:palette-outline"></ha-icon>
           <div>
-            <h2>Theme and colours</h2>
-            <p>Choose a theme, force its mode or override individual styles.</p>
+            <h2>Theme</h2>
+            <p>Choose a theme and mode, or customize colours.</p>
           </div>
         </div>
         ${content}
@@ -398,7 +417,7 @@ export class SidebarDialogColors extends BaseEditor {
     const modesRadio = html` <div class="header-row">
       <div class="title">Select mode to edit:</div>
       <div class="inputs">
-        <ha-formfield .label=${'Light Mode'} .disabled=${isDisabled('light')}>
+        <ha-formfield .label=${'Light mode'} .disabled=${isDisabled('light')}>
           <ha-radio
             @change=${(ev) => {
               this._colorConfigMode = (ev.target as HTMLInputElement).value as 'light' | 'dark';
@@ -410,7 +429,7 @@ export class SidebarDialogColors extends BaseEditor {
           >
           </ha-radio>
         </ha-formfield>
-        <ha-formfield .label=${'Dark Mode'} .disabled=${isDisabled('dark')}>
+        <ha-formfield .label=${'Dark mode'} .disabled=${isDisabled('dark')}>
           <ha-radio
             @change=${(ev) => {
               this._colorConfigMode = (ev.target as HTMLInputElement).value as 'light' | 'dark';
@@ -442,7 +461,7 @@ export class SidebarDialogColors extends BaseEditor {
         this._handleConfigChange(currentConfigValue, initColor);
         this._initColor = '';
         break;
-      case 'save':
+      case 'done':
         this._toggleColorPicker(currentConfigValue);
         this._initColor = '';
         break;
@@ -498,6 +517,8 @@ export class SidebarDialogColors extends BaseEditor {
           <ha-icon-button
             ?hidden=${isDefault || this._currentConfigValue !== undefined}
             .path=${mdiRefresh}
+            .label=${`Reset ${label.toLowerCase()}`}
+            aria-label=${`Reset ${label.toLowerCase()}`}
             color="var(--sidebar-text-color)"
             @click=${() => this._resetColorConfig(configValue)}
           ></ha-icon-button>
@@ -515,13 +536,15 @@ export class SidebarDialogColors extends BaseEditor {
                 <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('hex')}>HEX</ha-button>
                 <ha-button appearance="plain" size="s" @click=${() => this._handleColorPicker('rgb')}>RGBA</ha-button>
               </div>`
-            : html` <a
+            : html` <button
+                type="button"
+                aria-label=${`Choose ${label.toLowerCase()}`}
                 class="color-picker-box"
                 style=${styleMap(colorPickerBoxStyle)}
                 @click=${() => this._toggleColorPicker(configValue)}
               >
                 <ha-icon icon="mdi:format-color-fill"></ha-icon>
-              </a>`}
+              </button>`}
         </div>
       </div>
     `;
@@ -729,10 +752,11 @@ export class SidebarDialogColors extends BaseEditor {
     let updates: Partial<SidebarConfig> = {};
     if (configKey && configKey === 'appearance') {
       const appearanceSettings = pick(currentConfig, AppearanceConfigKeys) as SidebarAppearanceConfig;
-      const changes = getObjectDifferences(appearanceSettings, incoming);
+      const appearance = appearanceConfigData(incoming, appearanceSettings);
+      const changes = getObjectDifferences(appearanceSettings, appearance);
       if (!isEmpty(changes)) {
         Object.keys(changes).forEach((key) => {
-          updates[key as keyof SidebarAppearanceConfig] = incoming[key];
+          updates[key as keyof SidebarAppearanceConfig] = appearance[key];
         });
       }
     } else if (configKey && configKey === 'custom_theme') {
@@ -897,7 +921,7 @@ export class SidebarDialogColors extends BaseEditor {
           width: fit-content;
         }
 
-        a.color-picker-box {
+        .color-picker-box {
           width: fit-content;
           position: relative;
           display: inline-block;
@@ -915,6 +939,11 @@ export class SidebarDialogColors extends BaseEditor {
           margin-inline: 0.5rem;
           border-radius: inherit;
           transition: all 0.3s ease;
+        }
+
+        .color-picker-box:focus-visible {
+          outline: 2px solid var(--primary-color);
+          outline-offset: 2px;
         }
 
         .picker-wrapper {

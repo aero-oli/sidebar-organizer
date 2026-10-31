@@ -65,9 +65,10 @@ export class BaseEditor extends LitElement {
     const hass = this.hass;
     const panels = hass.panels || {};
     const notification = this._getPanelNotification(panelId);
-    if (this._dialog?._newItemMap?.has(panelId)) {
+    const customItem = this._config?.new_items?.find((item) => item.title === panelId);
+    if (customItem) {
       return {
-        ...this._dialog!._newItemMap!.get(panelId)!,
+        ...customItem,
         component_name: 'new-item',
       };
     } else {

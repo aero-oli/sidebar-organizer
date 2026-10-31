@@ -11,14 +11,16 @@ interface BooleanItem<T = string> {
 
 const BOOLEAN_OPTIONS = [
   {
-    name: 'hide_header_toggle',
-    label: 'Hide expand/collapse button',
-    helper: 'Remove the header button that opens or closes every sidebar group.',
+    name: 'show_header_toggle',
+    label: 'Show expand/collapse button',
+    helper: 'Show a header button to open or close all sidebar groups.',
+    default: true,
   },
   {
-    name: 'animation_off',
-    label: 'Disable group animation',
-    helper: 'Open and close groups immediately instead of animating each panel.',
+    name: 'animate_groups',
+    label: 'Animate groups',
+    helper: 'Animate panels when opening and closing groups.',
+    default: true,
   },
   {
     name: 'move_settings_from_fixed',
@@ -58,65 +60,78 @@ const commonBooleanSchema = (name?: BooleanItem['name'][]) => {
   return list;
 };
 
-export const BASE_APPEARANCE_SCHEMA = memoizeOne((data: SidebarAppearanceConfig) => {
-  const delayDisabled = data?.animation_off === true;
-  return [
-    {
-      type: 'grid',
-      schema: [
-        {
-          name: 'header_title',
-          label: 'Sidebar title',
-          helper: 'Text shown at the top of the sidebar.',
-          type: 'string',
-        },
-        ...commonBooleanSchema(['hide_header_toggle', 'animation_off']),
-        ...(!delayDisabled
-          ? [
-              {
-                name: 'animation_delay',
-                label: 'Animation Delay (ms)',
-                selector: {
-                  number: {
-                    min: 0,
-                    max: 100,
-                    step: 10,
-                    mode: 'slider',
-                    unit_of_measurement: 'ms',
-                  },
-                },
-                helper: 'Time between each panel appearing when a group opens. Lower is faster.',
-                default: 50,
-                disabled: delayDisabled,
-              },
-            ]
-          : []),
-        ...commonBooleanSchema(['move_settings_from_fixed', 'force_transparent_background', 'accordion_mode']),
-        {
-          name: 'text_transformation',
-          label: 'Text Transformation',
-          default: 'capitalize',
-          helper: 'Choose how group names are capitalized.',
-          selector: {
-            select: {
-              mode: 'dropdown',
-              options: [
-                ...TextTransformations.map((mode) => ({
-                  value: mode,
-                  label: mode.charAt(0).toUpperCase() + mode.slice(1),
-                })),
-              ],
+// Positive controls are local form values; persisted configuration keeps its existing keys.
+export const appearanceFormData = (data: SidebarAppearanceConfig) => ({
+  ...data,
+  show_header_toggle: !data.hide_header_toggle,
+  animate_groups: !data.animation_off,
+});
+
+export const appearanceConfigData = (data: Record<string, any>, current: SidebarAppearanceConfig) => {
+  const { show_header_toggle, animate_groups, ...config } = data;
+  if (typeof show_header_toggle === 'boolean' && show_header_toggle !== !current.hide_header_toggle) {
+    config.hide_header_toggle = !show_header_toggle;
+  }
+  if (typeof animate_groups === 'boolean' && animate_groups !== !current.animation_off) {
+    config.animation_off = !animate_groups;
+  }
+  return config;
+};
+
+export const APPEARANCE_SECTIONS = memoizeOne((data: SidebarAppearanceConfig) => [
+  {
+    title: 'Header',
+    icon: 'mdi:format-title',
+    schema: [
+      { name: 'header_title', label: 'Sidebar title', helper: 'Text shown at the top of the sidebar.', type: 'string' },
+      ...commonBooleanSchema(['show_header_toggle']),
+    ],
+  },
+  {
+    title: 'Group behaviour',
+    icon: 'mdi:folder-outline',
+    schema: [
+      ...commonBooleanSchema(['accordion_mode', 'animate_groups']),
+      ...(!data.animation_off
+        ? [
+            {
+              name: 'animation_delay',
+              label: 'Animation delay',
+              selector: { number: { min: 0, max: 100, step: 10, mode: 'slider', unit_of_measurement: 'ms' } },
+              helper: 'Time between each panel appearing when a group opens. Lower is faster.',
+              default: 50,
             },
+          ]
+        : []),
+      ...commonBooleanSchema(['move_settings_from_fixed']),
+      {
+        name: 'text_transformation',
+        label: 'Group name capitalization',
+        default: 'capitalize',
+        selector: {
+          select: {
+            mode: 'dropdown',
+            options: TextTransformations.map((mode) => ({
+              value: mode,
+              label: mode.charAt(0).toUpperCase() + mode.slice(1),
+            })),
           },
         },
-        {
-          name: 'width',
-          label: 'Custom Width',
-          helper:
-            'Optional sidebar width, for example 300px or 20%. Leave blank to use Home Assistant’s default.',
-          type: 'string',
-        },
-      ] as const,
-    },
-  ] as const;
-});
+      },
+    ],
+  },
+  {
+    title: 'Size',
+    icon: 'mdi:arrow-expand-horizontal',
+    schema: [
+      {
+        name: 'width',
+        label: 'Sidebar width',
+        helper: 'Optional width, for example 300px or 20%. Leave blank to use Home Assistant’s default.',
+        type: 'string',
+      },
+    ],
+  },
+]);
+
+export const THEME_APPEARANCE_SCHEMA = () => commonBooleanSchema(['force_transparent_background']);
