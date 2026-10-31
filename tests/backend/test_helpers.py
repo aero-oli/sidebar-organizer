@@ -1,9 +1,9 @@
+import importlib.util
+import json
 import os
 import sys
 import tempfile
 import unittest
-import importlib.util
-import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -115,14 +115,12 @@ class SidebarOrganizerBackendHelpersTest(unittest.TestCase):
         )
 
     def test_resolve_config_path_rejects_traversal(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with self.assertRaises(ValueError):
-                resolve_config_path(tmpdir, "../secrets.yaml")
+        with tempfile.TemporaryDirectory() as tmpdir, self.assertRaises(ValueError):
+            resolve_config_path(tmpdir, "../secrets.yaml")
 
     def test_resolve_config_path_rejects_absolute_path_outside_config(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with self.assertRaises(ValueError):
-                resolve_config_path(tmpdir, "/etc/passwd")
+        with tempfile.TemporaryDirectory() as tmpdir, self.assertRaises(ValueError):
+            resolve_config_path(tmpdir, "/etc/passwd")
 
     def test_resolve_profiles_path_stays_inside_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

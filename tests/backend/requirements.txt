@@ -1,0 +1,3 @@
+# Production YAML parser and WebSocket schema dependency used by backend tests.
+PyYAML==6.0.3
+voluptuous==0.16.0

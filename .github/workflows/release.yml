@@ -29,6 +29,8 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Install backend test dependencies
+        run: python3 -m pip install -r tests/backend/requirements.txt
       - name: Verify
         run: pnpm run verify
       - name: Ruff

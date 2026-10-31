@@ -13,9 +13,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 
 from .const import (
-    CONF_ALLOW_WRITE,
-    CONF_ALLOW_USER_WRITE,
     CONF_ALLOW_PREFERENCE_WRITE,
+    CONF_ALLOW_USER_WRITE,
+    CONF_ALLOW_WRITE,
     CONF_CONFIG_PATH,
     CONF_CREATE_IF_MISSING,
     CONF_PROFILES_PATH,
@@ -39,10 +39,11 @@ from .helpers import (
     frontend_module_url,
     has_revision_conflict,
     merge_watch_revisions,
-    profile_directory_metadata,
     preferences_path,
+    profile_directory_metadata,
     profile_path,
-    read_preferences,
+    read_preferences_with_metadata,
+    read_text_with_metadata,
     validate_yaml_config,
     write_preferences,
 )
@@ -159,12 +160,14 @@ async def websocket_read(
             )
             return
 
-    yaml_text = await hass.async_add_executor_job(path.read_text, "utf-8")
+    yaml_text, snapshot = await hass.async_add_executor_job(
+        read_text_with_metadata, path
+    )
     if len(yaml_text.encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
         connection.send_result(
             msg["id"],
             {
-                **(await _async_metadata(hass)),
+                **(await _async_metadata(hass, snapshot)),
                 "yaml": yaml_text,
                 "raw_yaml": yaml_text,
                 "valid": False,
@@ -177,7 +180,7 @@ async def websocket_read(
         connection.send_result(
             msg["id"],
             {
-                **(await _async_metadata(hass)),
+                **(await _async_metadata(hass, snapshot)),
                 "yaml": yaml_text,
                 "raw_yaml": yaml_text,
                 "config": validation["parsed"],
@@ -191,7 +194,7 @@ async def websocket_read(
     connection.send_result(
         msg["id"],
         {
-            **(await _async_metadata(hass)),
+            **(await _async_metadata(hass, snapshot)),
             "yaml": yaml_text,
             "raw_yaml": yaml_text,
             "config": validation["parsed"],
@@ -269,11 +272,11 @@ async def websocket_write(
                 "The shared Sidebar Organizer configuration changed after it was loaded.",
             )
             return
-        await hass.async_add_executor_job(
+        snapshot = await hass.async_add_executor_job(
             atomic_write_with_backup, _path(hass), msg["yaml"]
         )
         await _async_refresh_watch_state(hass, _path(hass))
-    metadata = await _async_metadata(hass)
+    metadata = await _async_metadata(hass, snapshot)
     connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
     _notify_config_subscribers(hass, metadata, exclude_connection=connection)
     await _notify_shared_profile_subscribers(hass, connection)
@@ -297,11 +300,12 @@ async def websocket_restore(
         )
         return
     target = _path(hass)
-    if not await _async_restore_backup(
+    snapshot = await _async_restore_backup(
         hass, connection, msg, target, "shared configuration"
-    ):
+    )
+    if snapshot is None:
         return
-    metadata = await _async_metadata(hass)
+    metadata = await _async_metadata(hass, snapshot)
     connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
     _notify_config_subscribers(hass, metadata, exclude_connection=connection)
     await _notify_shared_profile_subscribers(hass, connection)
@@ -367,12 +371,18 @@ async def websocket_profile_read(
         )
         return
 
-    yaml_text = await hass.async_add_executor_job(path.read_text, "utf-8")
+    yaml_text, snapshot = await hass.async_add_executor_job(
+        read_text_with_metadata, path
+    )
     if len(yaml_text.encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
         connection.send_result(
             msg["id"],
             {
-                **(await _async_profile_metadata(hass, connection, user_id)),
+                **(
+                    await _async_profile_metadata(
+                        hass, connection, user_id, snapshot, _source == "user"
+                    )
+                ),
                 "yaml": yaml_text,
                 "raw_yaml": yaml_text,
                 "valid": False,
@@ -384,7 +394,11 @@ async def websocket_profile_read(
     connection.send_result(
         msg["id"],
         {
-            **(await _async_profile_metadata(hass, connection, user_id)),
+            **(
+                await _async_profile_metadata(
+                    hass, connection, user_id, snapshot, _source == "user"
+                )
+            ),
             "yaml": yaml_text,
             "raw_yaml": yaml_text,
             "config": validation["parsed"],
@@ -448,10 +462,12 @@ async def websocket_profile_write(
             return
 
         target = _personal_profile_path(hass, user_id)
-        await hass.async_add_executor_job(atomic_write_with_backup, target, msg["yaml"])
+        snapshot = await hass.async_add_executor_job(
+            atomic_write_with_backup, target, msg["yaml"]
+        )
         await _async_refresh_watch_state(hass, target)
 
-    metadata = await _async_profile_metadata(hass, connection, user_id)
+    metadata = await _async_profile_metadata(hass, connection, user_id, snapshot, True)
     connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
     _notify_profile_subscribers(hass, user_id, metadata, exclude_connection=connection)
 
@@ -476,11 +492,12 @@ async def websocket_profile_restore(
     ):
         return
     target = _personal_profile_path(hass, user_id)
-    if not await _async_restore_backup(
+    snapshot = await _async_restore_backup(
         hass, connection, msg, target, "personal profile"
-    ):
+    )
+    if snapshot is None:
         return
-    metadata = await _async_profile_metadata(hass, connection, user_id)
+    metadata = await _async_profile_metadata(hass, connection, user_id, snapshot, True)
     connection.send_result(msg["id"], {**metadata, "valid": True, "errors": []})
     _notify_profile_subscribers(hass, user_id, metadata, exclude_connection=connection)
 
@@ -609,10 +626,14 @@ async def websocket_profile_copy(
             )
             return
         target = _personal_profile_path(hass, target_user_id)
-        await hass.async_add_executor_job(atomic_write_with_backup, target, yaml_text)
+        snapshot = await hass.async_add_executor_job(
+            atomic_write_with_backup, target, yaml_text
+        )
         await _async_refresh_watch_state(hass, target)
 
-    metadata = await _async_profile_metadata(hass, connection, target_user_id)
+    metadata = await _async_profile_metadata(
+        hass, connection, target_user_id, snapshot, True
+    )
     connection.send_result(msg["id"], metadata)
     _notify_profile_subscribers(
         hass, target_user_id, metadata, exclude_connection=connection
@@ -699,8 +720,9 @@ async def websocket_preferences_read(
         return
     path = preferences_path(_profiles_path(hass), user_id)
     try:
-        preferences = await hass.async_add_executor_job(read_preferences, path)
-        metadata = await hass.async_add_executor_job(file_metadata, path)
+        preferences, metadata = await hass.async_add_executor_job(
+            read_preferences_with_metadata, path
+        )
     except (OSError, ValueError) as err:
         connection.send_error(msg["id"], "invalid_preferences", str(err))
         return
@@ -760,16 +782,12 @@ async def websocket_preferences_write(
             )
             return
         try:
-            await hass.async_add_executor_job(
+            saved_preferences, metadata = await hass.async_add_executor_job(
                 write_preferences, path, msg["preferences"]
-            )
-            saved_preferences = await hass.async_add_executor_job(
-                read_preferences, path
             )
         except (OSError, ValueError) as err:
             connection.send_error(msg["id"], "invalid_preferences", str(err))
             return
-    metadata = await hass.async_add_executor_job(file_metadata, path)
     connection.send_result(
         msg["id"],
         {
@@ -923,7 +941,17 @@ def _notify_profile_subscribers(
     for (_connection_id, subscription_id), connection in list(subscribers.items()):
         if connection is exclude_connection:
             continue
-        connection.send_event(subscription_id, metadata)
+        can_write = hass.data[DOMAIN][CONF_ALLOW_WRITE] and (
+            connection.user.is_admin or hass.data[DOMAIN][CONF_ALLOW_USER_WRITE]
+        )
+        connection.send_event(
+            subscription_id,
+            {
+                **metadata,
+                "allow_write": can_write,
+                "capabilities": _capabilities(connection),
+            },
+        )
 
 
 async def _notify_shared_profile_subscribers(
@@ -980,23 +1008,29 @@ def _metadata(hass: HomeAssistant, metadata: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def _async_metadata(hass: HomeAssistant) -> dict[str, Any]:
+async def _async_metadata(
+    hass: HomeAssistant, snapshot: dict[str, Any] | None = None
+) -> dict[str, Any]:
     metadata = await hass.async_add_executor_job(file_metadata_with_backup, _path(hass))
-    return _metadata(hass, metadata)
+    return _metadata(hass, {**metadata, **(snapshot or {})})
 
 
 async def _async_profile_metadata(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     user_id: str,
+    snapshot: dict[str, Any] | None = None,
+    snapshot_is_personal: bool | None = None,
 ) -> dict[str, Any]:
     personal = _personal_profile_path(hass, user_id)
     shared = _path(hass)
 
     def collect() -> tuple[dict[str, Any], bool]:
-        profile_exists = personal.exists()
+        profile_exists = (
+            personal.exists() if snapshot_is_personal is None else snapshot_is_personal
+        )
         effective = personal if profile_exists else shared
-        metadata = file_metadata_with_backup(effective)
+        metadata = {**file_metadata_with_backup(effective), **(snapshot or {})}
         personal_backup = personal.with_suffix(f"{personal.suffix}.bak")
         metadata["profile_backup_exists"] = personal_backup.is_file()
         metadata["profile_backup_revision"] = (
@@ -1104,7 +1138,7 @@ async def _async_restore_backup(
     msg: dict[str, Any],
     target: Path,
     label: str,
-) -> bool:
+) -> dict[str, Any] | None:
     """Validate and restore one adjacent YAML backup under the write lock."""
     backup = target.with_suffix(f"{target.suffix}.bak")
     lock = hass.data[DOMAIN][PROFILE_LOCK]
@@ -1118,24 +1152,26 @@ async def _async_restore_backup(
                 "revision_conflict",
                 f"The {label} changed after it was loaded.",
             )
-            return False
+            return None
         if not await hass.async_add_executor_job(backup.is_file):
             connection.send_error(
                 msg["id"], "backup_missing", f"No previous {label} is available."
             )
-            return False
+            return None
         yaml_text = await hass.async_add_executor_job(backup.read_text, "utf-8")
         if len(yaml_text.encode("utf-8")) > MAX_CONFIG_YAML_BYTES:
             connection.send_error(
                 msg["id"], "backup_too_large", f"The previous {label} exceeds 512 KiB."
             )
-            return False
+            return None
         validation = await hass.async_add_executor_job(validate_yaml_config, yaml_text)
         if not validation["valid"]:
             connection.send_error(
                 msg["id"], "invalid_backup", f"The previous {label} is invalid."
             )
-            return False
-        await hass.async_add_executor_job(atomic_write_with_backup, target, yaml_text)
+            return None
+        snapshot = await hass.async_add_executor_job(
+            atomic_write_with_backup, target, yaml_text
+        )
         await _async_refresh_watch_state(hass, target)
-    return True
+    return snapshot

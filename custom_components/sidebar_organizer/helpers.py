@@ -11,17 +11,19 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 try:
     from .const import (
-        CONF_ALLOW_WRITE,
-        CONF_ALLOW_USER_WRITE,
         CONF_ALLOW_PREFERENCE_WRITE,
+        CONF_ALLOW_USER_WRITE,
+        CONF_ALLOW_WRITE,
         CONF_CONFIG_PATH,
         CONF_CREATE_IF_MISSING,
         CONF_PROFILES_PATH,
-        DEFAULT_ALLOW_WRITE,
-        DEFAULT_ALLOW_USER_WRITE,
         DEFAULT_ALLOW_PREFERENCE_WRITE,
+        DEFAULT_ALLOW_USER_WRITE,
+        DEFAULT_ALLOW_WRITE,
         DEFAULT_CONFIG_PATH,
         DEFAULT_CREATE_IF_MISSING,
         DEFAULT_PROFILES_PATH,
@@ -45,12 +47,6 @@ except ImportError:  # pragma: no cover - used by lightweight direct module test
     PROFILE_DIR_MARKER = ".sidebar-organizer-profiles"
     FRONTEND_JS = "sidebar-organizer.js"
     FRONTEND_URL_BASE = "/sidebar_organizer/frontend"
-
-try:
-    import yaml
-except ModuleNotFoundError:  # pragma: no cover - Home Assistant provides PyYAML.
-    yaml = None
-
 
 DEFAULT_CONFIG_YAML = """header_title: Home Assistant
 hide_header_toggle: false
@@ -287,14 +283,14 @@ def validate_yaml_config(yaml_text: str) -> dict[str, Any]:
     """Validate YAML text using the backend's minimal Sidebar Organizer schema."""
     try:
         parsed = _safe_load_yaml(yaml_text)
-    except Exception as err:
+    except yaml.YAMLError as err:
         return {"valid": False, "errors": [f"YAML parse error: {err}"], "parsed": None}
 
     errors = validate_config_object(parsed)
     return {"valid": len(errors) == 0, "errors": errors, "parsed": parsed}
 
 
-def atomic_write_text(target: Path, content: str) -> None:
+def atomic_write_text(target: Path, content: str) -> dict[str, Any]:
     """Atomically write UTF-8 text to target."""
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(
@@ -306,19 +302,23 @@ def atomic_write_text(target: Path, content: str) -> None:
             temp_file.write(content)
             temp_file.flush()
             os.fsync(temp_file.fileno())
+            metadata = _content_metadata(
+                content.encode("utf-8"), os.fstat(temp_file.fileno())
+            )
         os.replace(temp_path, target)
+        return metadata
     finally:
         if temp_path.exists():
             temp_path.unlink()
 
 
-def atomic_write_with_backup(target: Path, content: str) -> None:
+def atomic_write_with_backup(target: Path, content: str) -> dict[str, Any]:
     """Atomically write text and retain the previous successful version."""
     if target.exists():
         atomic_write_text(
             target.with_suffix(f"{target.suffix}.bak"), target.read_text("utf-8")
         )
-    atomic_write_text(target, content)
+    return atomic_write_text(target, content)
 
 
 def preferences_path(profiles_dir: Path, user_id: str) -> Path:
@@ -329,9 +329,22 @@ def preferences_path(profiles_dir: Path, user_id: str) -> Path:
 
 def read_preferences(path: Path) -> dict[str, Any]:
     """Read and validate per-user preferences, tolerating a missing file."""
-    if not path.exists():
-        return {"collapsed_groups": [], "sync_collapsed_groups": True}
-    parsed = json.loads(path.read_text("utf-8"))
+    return read_preferences_with_metadata(path)[0]
+
+
+def read_preferences_with_metadata(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Read preferences and their revision from the same file contents."""
+    try:
+        text, metadata = read_text_with_metadata(path)
+    except FileNotFoundError:
+        return (
+            {"collapsed_groups": [], "sync_collapsed_groups": True},
+            {"exists": False, "last_modified": None, "size": None, "revision": None},
+        )
+    return _parse_preferences(json.loads(text)), metadata
+
+
+def _parse_preferences(parsed: Any) -> dict[str, Any]:
     if not isinstance(parsed, dict) or not _is_list_of_strings(
         parsed.get("collapsed_groups", [])
     ):
@@ -341,7 +354,7 @@ def read_preferences(path: Path) -> dict[str, Any]:
         raise ValueError("preferences.known_groups must be a list of strings")
     sync_collapsed_groups = parsed.get("sync_collapsed_groups", True)
     if not isinstance(sync_collapsed_groups, bool):
-        raise ValueError("preferences.sync_collapsed_groups must be a boolean")
+        raise ValueError("preferences.sync_collapsed_groups must be a boolean")  # noqa: TRY004 - validation API
     return {
         "collapsed_groups": parsed.get("collapsed_groups", []),
         "sync_collapsed_groups": sync_collapsed_groups,
@@ -349,7 +362,9 @@ def read_preferences(path: Path) -> dict[str, Any]:
     }
 
 
-def write_preferences(path: Path, preferences: dict[str, Any]) -> None:
+def write_preferences(
+    path: Path, preferences: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Validate and atomically persist per-user preferences."""
     collapsed = preferences.get("collapsed_groups")
     if not _is_list_of_strings(collapsed):
@@ -359,13 +374,31 @@ def write_preferences(path: Path, preferences: dict[str, Any]) -> None:
         raise ValueError("preferences.known_groups must be a list of strings")
     sync_collapsed_groups = preferences.get("sync_collapsed_groups", True)
     if not isinstance(sync_collapsed_groups, bool):
-        raise ValueError("preferences.sync_collapsed_groups must be a boolean")
+        raise ValueError("preferences.sync_collapsed_groups must be a boolean")  # noqa: TRY004 - validation API
     payload = {
         "collapsed_groups": collapsed,
         "sync_collapsed_groups": sync_collapsed_groups,
         **({"known_groups": known_groups} if known_groups is not None else {}),
     }
-    atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
+    metadata = atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
+    return payload, metadata
+
+
+def _content_metadata(content: bytes, stat: os.stat_result) -> dict[str, Any]:
+    return {
+        "exists": True,
+        "last_modified": stat.st_mtime,
+        "size": len(content),
+        "revision": hashlib.sha256(content).hexdigest(),
+    }
+
+
+def read_text_with_metadata(path: Path) -> tuple[str, dict[str, Any]]:
+    """Read UTF-8 text and derive its revision from that exact byte snapshot."""
+    with path.open("rb") as file:
+        content = file.read()
+        stat = os.fstat(file.fileno())
+    return content.decode("utf-8"), _content_metadata(content, stat)
 
 
 def file_metadata(path: Path) -> dict[str, Any]:
@@ -556,75 +589,4 @@ def _validate_pinned_groups(value: Any, errors: list[str]) -> None:
 def _safe_load_yaml(yaml_text: str) -> Any:
     if not yaml_text.strip():
         return {}
-    if yaml is not None:
-        return yaml.safe_load(yaml_text)
-    return _fallback_parse_simple_yaml(yaml_text)
-
-
-def _fallback_parse_simple_yaml(yaml_text: str) -> dict[str, Any]:
-    """Parse the small YAML subset used by local helper tests when PyYAML is unavailable."""
-    result: dict[str, Any] = {}
-    current_key: str | None = None
-    current_group: str | None = None
-
-    for raw_line in yaml_text.splitlines():
-        if not raw_line.strip():
-            continue
-
-        indent = len(raw_line) - len(raw_line.lstrip(" "))
-        line = raw_line.strip()
-
-        if indent == 0 and ":" in line:
-            key, raw_value = line.split(":", 1)
-            current_key = key
-            current_group = None
-            value = raw_value.strip()
-            if value == "":
-                result[key] = {}
-            elif value == "[]":
-                result[key] = []
-            else:
-                result[key] = _parse_scalar(value)
-            continue
-
-        if current_key is None:
-            raise ValueError(f"Unsupported YAML line: {raw_line}")
-
-        if indent == 2 and line.startswith("- "):
-            if not isinstance(result.get(current_key), list):
-                result[current_key] = []
-            result[current_key].append(line[2:].strip())
-            continue
-
-        if indent == 2 and line.endswith(":"):
-            if not isinstance(result.get(current_key), dict):
-                result[current_key] = {}
-            current_group = line[:-1]
-            result[current_key][current_group] = []
-            continue
-
-        if indent == 2 and ":" in line:
-            group_name, raw_value = line.split(":", 1)
-            if not isinstance(result.get(current_key), dict):
-                result[current_key] = {}
-            result[current_key][group_name] = _parse_scalar(raw_value.strip())
-            current_group = group_name
-            continue
-
-        if indent == 4 and current_group and line.startswith("- "):
-            result[current_key][current_group].append(line[2:].strip())
-            continue
-
-        raise ValueError(f"Unsupported YAML line: {raw_line}")
-
-    return result
-
-
-def _parse_scalar(value: str) -> Any:
-    if value == "true":
-        return True
-    if value == "false":
-        return False
-    if value.startswith("'") and value.endswith("'"):
-        return value[1:-1]
-    return value
+    return yaml.safe_load(yaml_text)

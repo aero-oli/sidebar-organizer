@@ -38,6 +38,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Install backend test dependencies
+        run: python3 -m pip install -r tests/backend/requirements.txt
       - uses: astral-sh/ruff-action@v3
         with:
           version: 0.15.17

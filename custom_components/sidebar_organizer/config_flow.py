@@ -9,9 +9,9 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 
 from .const import (
-    CONF_ALLOW_WRITE,
-    CONF_ALLOW_USER_WRITE,
     CONF_ALLOW_PREFERENCE_WRITE,
+    CONF_ALLOW_USER_WRITE,
+    CONF_ALLOW_WRITE,
     CONF_CONFIG_PATH,
     CONF_CREATE_IF_MISSING,
     CONF_PROFILES_PATH,
