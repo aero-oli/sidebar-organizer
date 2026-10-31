@@ -1,3 +1,9 @@
+## [4.8.6](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.5...v4.8.6) (2026-10-31)
+
+### Bug Fixes
+
+* Keep split bundles independent of cached entry modules ([5a6bd54](https://github.com/aero-oli/sidebar-organizer/commit/5a6bd54915e9660225e11e7c677144263fd8fa97))
+
 ## [4.8.5](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.4...v4.8.5) (2026-10-31)
 
 ### Bug Fixes
