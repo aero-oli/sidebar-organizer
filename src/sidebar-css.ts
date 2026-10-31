@@ -49,6 +49,11 @@ export const DIVIDER_ADDED_STYLE = css`
     color: var(--primary-color);
     opacity: 1;
   }
+  :host .collapse-toggle:focus-visible,
+  :host .divider[added]:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
 
   :host([expanded]) .title.toggle {
     display: flex !important;
@@ -181,7 +186,7 @@ export const DIVIDER_ADDED_STYLE = css`
     }
   }
 
-  :host .divider.collapsed[added][aria-selected='true'] {
+  :host .divider.collapsed[added].child-selected {
     background-color: rgb(from var(--sidebar-selected-icon-color) r g b / 0.12);
   }
 

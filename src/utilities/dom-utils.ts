@@ -51,7 +51,7 @@ export const createExpansionPanel = ({ content, options }: ExpandablePanelProps)
   `;
 };
 
-export function addAction(configItem: HTMLElement, action?: () => void, clickAction?: () => void): void {
+export function addAction(configItem: HTMLElement, action?: () => void, clickAction?: () => void): () => void {
   // Variable to keep track of whether the user is holding the mouse or touch
   let isMouseHold = false;
   let isLongPress = false;
@@ -63,6 +63,7 @@ export function addAction(configItem: HTMLElement, action?: () => void, clickAct
     // Check if it's a mouse event and ensure it's the left button (button 0)
     if (e instanceof MouseEvent && e.button !== 0) return;
 
+    if (timeoutref) clearTimeout(timeoutref);
     isMouseHold = true;
     isLongPress = false;
 
@@ -84,12 +85,13 @@ export function addAction(configItem: HTMLElement, action?: () => void, clickAct
     isMouseHold = false;
 
     // Prevent click action if it was a long-press
-    if (isLongPress) {
+    const wasLongPress = isLongPress;
+    if (wasLongPress) {
       e.preventDefault();
       isLongPress = false;
     }
     // Trigger click action if hold was not a long press
-    if (!isLongPress && clickAction) {
+    if (!wasLongPress && clickAction) {
       clickAction();
     }
   };
@@ -102,6 +104,17 @@ export function addAction(configItem: HTMLElement, action?: () => void, clickAct
   ['touchend', 'mouseup'].forEach((eventType) => {
     configItem.addEventListener(eventType, handleUpEvent);
   });
+  const cancelHold = () => {
+    if (timeoutref) clearTimeout(timeoutref);
+    isMouseHold = false;
+  };
+  ['touchcancel', 'mouseleave'].forEach((eventType) => configItem.addEventListener(eventType, cancelHold));
+  return () => {
+    cancelHold();
+    ['touchstart', 'mousedown'].forEach((eventType) => configItem.removeEventListener(eventType, handleDownEvent));
+    ['touchend', 'mouseup'].forEach((eventType) => configItem.removeEventListener(eventType, handleUpEvent));
+    ['touchcancel', 'mouseleave'].forEach((eventType) => configItem.removeEventListener(eventType, cancelHold));
+  };
 }
 export const resetPanelOrder = (paperListBox: HTMLElement): void => {
   // Remove filtered panel items
@@ -167,7 +180,6 @@ export const onPanelLoaded = (path: string, paperListbox: HTMLElement): void => 
     const items = paperListbox?.querySelectorAll(`${ELEMENT.ITEM}[group="${group}"]`) as NodeListOf<HTMLElement>;
     const childSelected = Object.values(items).some((item) => item.classList.contains(CLASS.SELECTED));
     divider.classList.toggle('child-selected', childSelected);
-    divider.setAttribute('aria-selected', childSelected.toString());
   });
 };
 

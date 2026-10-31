@@ -29,7 +29,7 @@ import {
   ElementsStore,
   HaTooltip,
 } from '@types';
-import { _getDarkConfigMode, applyTheme } from '@utilities/apply-theme';
+import { _getDarkConfigMode, applyTheme, getAllThemeData } from '@utilities/apply-theme';
 import { compareHacsTagDiff } from '@utilities/compare-urls';
 import { fetchConfig, getLastConfigLoadStatus } from '@utilities/configs';
 import { atLeastVersion, clearSidebarOrganizerStorage, normalizePinnedGroups } from '@utilities/configs/misc';
@@ -81,6 +81,11 @@ export class SidebarOrganizer {
         if (!this._ha) return;
         const hass = await waitForHass(() => this._ha.hass);
         setActiveStorageUser(hass.user!.id);
+        this._restoreSidebarSnapshot();
+        this._store?.dispose();
+        this._profileUnsubscribe?.();
+        this._profileUnsubscribe = undefined;
+        this._disposeProfileAction?.();
         this._haDrawer = (await HA_DRAWER.element) as HaDrawer;
         this.HaSidebar = await HA_SIDEBAR.element;
         this.sideBarRoot = (await HA_SIDEBAR.selector.$.element) as ShadowRoot;
@@ -176,6 +181,7 @@ export class SidebarOrganizer {
 
   private _sidebarObserver: MutationObserver;
   private _profileUnsubscribe?: () => void;
+  private _disposeProfileAction?: () => void;
   private _activePersonalProfile = false;
   private _effectiveRevision?: string | null;
   private _lifecycle = new RuntimeLifecycle();
@@ -192,6 +198,13 @@ export class SidebarOrganizer {
   private _sidebarSnapshot?: {
     attributes: Map<HTMLElement, Array<[string, string]>>;
     parents: Array<{ children: Node[]; parent: HTMLElement }>;
+    width?: { element: HTMLElement; value: string; priority: string };
+    drawerRoot?: ShadowRoot;
+    theme?: {
+      element: HTMLElement & { _themes?: Record<string, string> };
+      originalThemes?: Record<string, string>;
+      properties: Map<string, [string, string]>;
+    };
   };
 
   get hass(): HaExtened['hass'] {
@@ -327,15 +340,21 @@ export class SidebarOrganizer {
     const huiRoot = (await this._panelLovelace.selector.$.query(SELECTOR.HUI_ROOT).element) as HTMLElement;
     if (!huiRoot) return;
 
-    this._styleManager.addStyle([HUI_ROOT_STYLE.toString()], huiRoot.shadowRoot!);
-
     const header = huiRoot.shadowRoot!.querySelector('.header') as HTMLElement | null;
     const toolbar = header?.querySelector('.toolbar') as HTMLElement | null;
     if (!header || !toolbar) return;
+    this._styleManager.addStyle([HUI_ROOT_STYLE.toString()], huiRoot.shadowRoot!);
+    const originalToolbar = ['transform', 'opacity'].map(
+      (property) => [property, toolbar.style.getPropertyValue(property), toolbar.style.getPropertyPriority(property)]
+    );
+    const originalProgress = header.style.getPropertyValue('--header-hide-progress');
+    const originalProgressPriority = header.style.getPropertyPriority('--header-hide-progress');
+    const originallyHidden = header.classList.contains('scroll-hide');
     console.debug('Scroll hide header enabled, setting up scroll listener');
     const maxHide = toolbar.offsetHeight || header.offsetHeight || 56;
 
     let ticking = false;
+    let animationFrame: number | undefined;
     let lastScrollY = window.scrollY;
     let currentOffset = 0;
     let accumulatedDelta = 0;
@@ -344,6 +363,7 @@ export class SidebarOrganizer {
 
     const updateHeaderVisibility = () => {
       ticking = false;
+      animationFrame = undefined;
 
       const scrollY = window.scrollY;
       const delta = scrollY - lastScrollY;
@@ -378,7 +398,7 @@ export class SidebarOrganizer {
     const onScroll = () => {
       if (ticking) return;
       ticking = true;
-      requestAnimationFrame(updateHeaderVisibility);
+      animationFrame = requestAnimationFrame(updateHeaderVisibility);
     };
 
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -386,6 +406,15 @@ export class SidebarOrganizer {
 
     this._onWindowScrollHideHeader = () => {
       window.removeEventListener('scroll', onScroll);
+      if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
+      for (const [property, value, priority] of originalToolbar) {
+        if (value) toolbar.style.setProperty(property, value, priority);
+        else toolbar.style.removeProperty(property);
+      }
+      if (originalProgress) header.style.setProperty('--header-hide-progress', originalProgress, originalProgressPriority);
+      else header.style.removeProperty('--header-hide-progress');
+      header.classList.toggle('scroll-hide', originallyHidden);
+      this._styleManager.removeStyle(huiRoot.shadowRoot!);
     };
   }
 
@@ -421,6 +450,7 @@ export class SidebarOrganizer {
           this._prevPath === PATH.LOVELACE_DASHBOARD &&
           this._currentPath !== PATH.LOVELACE_DASHBOARD
         ) {
+          this._store.dispose();
           this._checkDashboardChange();
         }
       }
@@ -477,8 +507,8 @@ export class SidebarOrganizer {
       setTimeout(() => {
         if (this._diffCheck && this.firstSetUpDone && this.setupConfigDone) {
           onPanelLoaded(pathName, paperListBox);
-          if (pathName === PATH.LOVELACE_DASHBOARD) {
-            this._store._subscribePanels();
+          if (pathName === PATH.LOVELACE_DASHBOARD && window.location.pathname === PATH.LOVELACE_DASHBOARD) {
+            void this._store._subscribePanels().catch((err) => LOGGER.warn('Could not watch sidebar panels.', err));
           }
         }
       }, 100);
@@ -501,6 +531,8 @@ export class SidebarOrganizer {
   }
 
   private async _setupConfigBtn(): Promise<void> {
+    this._disposeProfileAction?.();
+    this._disposeProfileAction = undefined;
     const siderbarRoot = (await this._sidebar.selector.$.element) as ShadowRoot;
     const profileEl =
       (siderbarRoot?.querySelector(SELECTOR.ITEM_PROFILE) as HTMLElement) ||
@@ -517,10 +549,10 @@ export class SidebarOrganizer {
         'color: #228be6; font-weight: 600;'
       );
 
-      addAction(profileEl, this._dialogManager._addDialogUserDataClear.bind(this._dialogManager));
+      this._disposeProfileAction = addAction(profileEl, this._dialogManager._addDialogUserDataClear.bind(this._dialogManager));
       return;
     } else {
-      addAction(profileEl, this._dialogManager._showConfigDialogEditor.bind(this._dialogManager));
+      this._disposeProfileAction = addAction(profileEl, this._dialogManager._showConfigDialogEditor.bind(this._dialogManager));
     }
   }
 
@@ -702,7 +734,9 @@ export class SidebarOrganizer {
     const topContainer = this.sideBarRoot?.querySelector(
       SELECTOR.SIDEBAR_BEFORE_SPACER_CONTAINER
     ) as HTMLElement | null;
-    const parents = [this._panelsList, topContainer].filter(
+    const title = this.sideBarRoot?.querySelector(`${SELECTOR.MENU} ${SELECTOR.MENU_TITLE}`) as HTMLElement | null;
+    const itemParents = this._panelsList?.querySelectorAll<HTMLElement>(ELEMENT.ITEM) || [];
+    const parents = [this._panelsList, topContainer, title, ...itemParents].filter(
       (value): value is HTMLElement => value instanceof HTMLElement
     );
     const elements = new Set<HTMLElement>();
@@ -717,7 +751,7 @@ export class SidebarOrganizer {
           [...element.attributes].map((attribute) => [attribute.name, attribute.value]),
         ])
       ),
-      parents: parents.map((parent) => ({
+      parents: [...elements].map((parent) => ({
         children: Array.from(parent.childNodes),
         parent,
       })),
@@ -725,8 +759,25 @@ export class SidebarOrganizer {
   }
 
   private _restoreSidebarSnapshot(): void {
+    this._onWindowScrollHideHeader?.();
+    this._onWindowScrollHideHeader = undefined;
     if (!this._sidebarSnapshot) return;
+    const { width, theme, drawerRoot } = this._sidebarSnapshot;
     this._styleManager.removeStyle(this.sideBarRoot);
+    if (width) {
+      if (width.value) width.element.style.setProperty(CSS_VAR.CUSTOM_SIDEBAR_WIDTH, width.value, width.priority);
+      else width.element.style.removeProperty(CSS_VAR.CUSTOM_SIDEBAR_WIDTH);
+      this._styleManager.removeStyle(width.element.shadowRoot!);
+    }
+    if (drawerRoot) this._styleManager.removeStyle(drawerRoot);
+    if (theme) {
+      for (const [property, [value, priority]] of theme.properties) {
+        if (value) theme.element.style.setProperty(property, value, priority);
+        else theme.element.style.removeProperty(property);
+      }
+      if (theme.originalThemes) theme.element._themes = theme.originalThemes;
+      else delete theme.element._themes;
+    }
     for (const [element, attributes] of this._sidebarSnapshot.attributes) {
       for (const name of element.getAttributeNames()) element.removeAttribute(name);
       for (const [name, value] of attributes) element.setAttribute(name, value);
@@ -1115,6 +1166,7 @@ export class SidebarOrganizer {
     const menuEl = this.sideBarRoot?.querySelector(SELECTOR.MENU) as HTMLElement | null;
     const titleEl = menuEl?.querySelector(SELECTOR.MENU_TITLE) as HTMLElement | null;
     if (!titleEl) return;
+    titleEl.querySelector(`.${CLASS.COLLAPSE_TOGGLE}`)?.remove();
 
     const customTitle = this._config.header_title;
     if (customTitle) titleEl.innerText = customTitle;
@@ -1133,6 +1185,10 @@ export class SidebarOrganizer {
     expandCollapseIcon.icon = isAllCollapsed ? MDI.PLUS : MDI.MINUS;
     expandCollapseIcon.classList.add(CLASS.COLLAPSE_TOGGLE);
     expandCollapseIcon.classList.toggle(CLASS.ACTIVE, isAllCollapsed);
+    expandCollapseIcon.tabIndex = 0;
+    expandCollapseIcon.setAttribute('role', 'button');
+    expandCollapseIcon.setAttribute('aria-label', isAllCollapsed ? 'Expand all groups' : 'Collapse all groups');
+    expandCollapseIcon.setAttribute('aria-expanded', String(!isAllCollapsed));
 
     // Helps avoid weird touch gestures and delays
     (expandCollapseIcon as HTMLElement).style.touchAction = 'manipulation';
@@ -1152,8 +1208,10 @@ export class SidebarOrganizer {
       this._schedulePreferencesSave();
     };
 
-    // Pointer events = one event stream for mouse + touch + pen
-    expandCollapseIcon.addEventListener('pointerup', toggle, { passive: false });
+    expandCollapseIcon.addEventListener('click', toggle);
+    expandCollapseIcon.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.key === ' ') toggle(event);
+    });
 
     // Remove any existing icon to prevent duplicates when re-rendering header
     titleEl.querySelector(`.${CLASS.COLLAPSE_TOGGLE}`)?.remove();
@@ -1167,6 +1225,8 @@ export class SidebarOrganizer {
     const isAllCollapsed = areGroupsCollapsed(groupKeys, this.collapsedItems);
     toggleIcon.classList.toggle(CLASS.ACTIVE, isAllCollapsed!);
     toggleIcon.setAttribute('icon', isAllCollapsed ? MDI.PLUS : MDI.MINUS);
+    toggleIcon.setAttribute('aria-label', isAllCollapsed ? 'Expand all groups' : 'Collapse all groups');
+    toggleIcon.setAttribute('aria-expanded', String(!isAllCollapsed));
   }
 
   private _subscribeTemplate(value: string, callback: (result: string) => void): void {
@@ -1211,6 +1271,10 @@ export class SidebarOrganizer {
     divider.setAttribute(ATTRIBUTE.GROUP, group);
     divider.setAttribute(ATTRIBUTE.ADDED, '');
     divider.classList.toggle(CLASS.COLLAPSED, isCollapsed);
+    divider.tabIndex = 0;
+    divider.setAttribute('role', 'button');
+    divider.setAttribute('aria-label', group);
+    divider.setAttribute('aria-expanded', String(!isCollapsed));
     const contentDiv = this._createAddedGroupContent(group, isCollapsed) as HTMLElement;
     divider.appendChild(contentDiv);
     if (this._pinnedGroups[group]) {
@@ -1223,6 +1287,12 @@ export class SidebarOrganizer {
       divider.appendChild(haTooltip);
     }
     divider.addEventListener('click', this._toggleGroup.bind(this));
+    divider.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        this._toggleGroup(event);
+      }
+    });
     return divider;
   };
 
@@ -1308,6 +1378,7 @@ export class SidebarOrganizer {
       const group = divider.getAttribute(ATTRIBUTE.GROUP);
       const isGroupCollapsed = collapsedItems.has(group!);
       divider.classList.toggle(CLASS.COLLAPSED, isGroupCollapsed);
+      divider.setAttribute('aria-expanded', String(!isGroupCollapsed));
       divider.querySelector(SELECTOR.ADDED_CONTENT)?.classList.toggle(CLASS.COLLAPSED, isGroupCollapsed);
       // console.log('Divider:', divider, 'Group:', group, 'Collapsed:', isGroupCollapsed);
     });
@@ -1322,6 +1393,13 @@ export class SidebarOrganizer {
       console.debug('❌ Invalid custom width, skipping applying custom width style:', width);
       return;
     }
+    if (this._sidebarSnapshot && !this._sidebarSnapshot.width) {
+      this._sidebarSnapshot.width = {
+        element: haMain,
+        value: haMain.style.getPropertyValue(CSS_VAR.CUSTOM_SIDEBAR_WIDTH),
+        priority: haMain.style.getPropertyPriority(CSS_VAR.CUSTOM_SIDEBAR_WIDTH),
+      };
+    }
     haMain.style.setProperty(CSS_VAR.CUSTOM_SIDEBAR_WIDTH, customWidth);
     console.debug('Custom sidebar width applied:', customWidth);
 
@@ -1333,6 +1411,24 @@ export class SidebarOrganizer {
     const customTheme = color_config?.custom_theme?.theme || undefined;
     // console.log('Adding Additional Styles for mode:', mode);
     if (customTheme) {
+      const themeData = this.hass.themes.themes[customTheme];
+      if (this._sidebarSnapshot && themeData) {
+        const element = this.HaSidebar as HTMLElement & { _themes?: Record<string, string> };
+        const snapshot = (this._sidebarSnapshot.theme ||= {
+          element,
+          originalThemes: element._themes ? { ...element._themes } : undefined,
+          properties: new Map(),
+        });
+        const properties = new Set([
+          ...Object.keys(element._themes || {}),
+          ...Object.keys(getAllThemeData(themeData, mode)).map((property) => `--${property}`),
+        ]);
+        for (const property of properties) {
+          if (!snapshot.properties.has(property)) {
+            snapshot.properties.set(property, [element.style.getPropertyValue(property), element.style.getPropertyPriority(property)]);
+          }
+        }
+      }
       applyTheme(this.HaSidebar, this.hass, customTheme, mode);
       console.log('Custom Theme:', customTheme, 'Mode:', mode);
     }
@@ -1372,6 +1468,7 @@ export class SidebarOrganizer {
 
     // If force transparent background is enabled, override related colors and add backdrop filter styles
     if (forceTransparentBackground) {
+      if (this._sidebarSnapshot) this._sidebarSnapshot.drawerRoot = this._haDrawer!.shadowRoot!;
       colorCssConfig[CSS_VAR.SIDEBAR_BACKGROUND_COLOR] = CSS_VAR_VALUE.TRANSPARENT;
       colorCssConfig[CSS_VAR.SO_TOOLTIP_BACKGROUND_COLOR] = CSS_VAR_VALUE.PRIMARY_BACKGROUND_COLOR;
       colorCssConfig[CSS_VAR.SO_TOOLTIP_TEXT_COLOR] = CSS_VAR_VALUE.PRIMARY_TEXT_COLOR;
@@ -1542,11 +1639,11 @@ export class SidebarOrganizer {
     this._subscribeTemplate(template, callback);
   }
 
-  private _toggleGroup(event: MouseEvent) {
+  private _toggleGroup(event: Event) {
     event.stopPropagation();
     const noAnimation = this._config?.animation_off || false;
     const animationDelay = this._config?.animation_delay || 50;
-    const target = event.target as HTMLElement;
+    const target = event.currentTarget as HTMLElement;
     const group = target.getAttribute('group');
     // const targetParent = target.parentElement as HTMLElement;
     // console.log('%cSIDEBAR-ORGANIZER:', 'color: #bada55;', 'Toggling group:', group, target, targetParent);
@@ -1584,6 +1681,7 @@ export class SidebarOrganizer {
           );
           if (divider) {
             divider.classList.add(CLASS.COLLAPSED);
+            divider.setAttribute('aria-expanded', 'false');
             divider.querySelector(SELECTOR.ADDED_CONTENT)?.classList.add(CLASS.COLLAPSED);
           }
           otherItems.forEach((item) => item.classList.add(CLASS.COLLAPSED));
@@ -1595,7 +1693,8 @@ export class SidebarOrganizer {
 
     // Toggle collapsed state for group and its items
     target.classList.toggle(CLASS.COLLAPSED, !isCollapsed);
-    target.parentElement?.classList.toggle(CLASS.COLLAPSED, !isCollapsed);
+    target.setAttribute('aria-expanded', String(isCollapsed));
+    target.querySelector(SELECTOR.ADDED_CONTENT)?.classList.toggle(CLASS.COLLAPSED, !isCollapsed);
 
     // Animate items if noAnimation is false
     if (noAnimation) {

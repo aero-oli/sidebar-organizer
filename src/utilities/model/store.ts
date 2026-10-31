@@ -20,6 +20,9 @@ export default class Store {
   public _panelHasChanged = false;
 
   public _utils = UTILITIES;
+  private _panelUnsubscribe?: () => void;
+  private _panelSubscriptionPending = false;
+  private _subscriptionGeneration = 0;
 
   constructor(ha: HaExtened, organizer: SidebarOrganizer) {
     this.haElement = ha;
@@ -38,60 +41,78 @@ export default class Store {
   };
 
   public async _subscribePanels(): Promise<void> {
-    if (!this._organizer._pluginConfigured) {
+    if (!this._organizer._pluginConfigured || this._panelUnsubscribe || this._panelSubscriptionPending) {
       return;
     }
-
-    const hasUserDefaultPanel = Boolean(this.hass.userData?.default_panel);
-    if (!this._dashboardPanels?.initialPanels) {
-      await this._getPanelItems(hasUserDefaultPanel).then((items) => {
-        this._dashboardPanels = {
-          initialPanels: [...items],
-          notShowInSidebar:
-            items.filter((item) => !item.show_in_sidebar).map((item) => this.hass.panels[item.url_path]!) || [],
-        };
-      });
-      console.debug('%cSTORE:', 'color: #4dabf7;', 'Initial dashboard panels state set to', this._dashboardPanels);
-    }
-
-    this._utils.PANEL.subscribePanels(this.hass.connection, async (panels: Panels) => {
-      const initDasboardPanels = this._dashboardPanels ?? { initialPanels: [], notShowInSidebar: [] };
-      const initialPanels = initDasboardPanels.initialPanels || [];
-      const newDasboards = await this._getPanelItems(hasUserDefaultPanel);
-      // Get deleted panels and added panels, by comparing new dashboards with initial panels
-      const removed = initialPanels
-        .filter((item) => Object.values(newDasboards).every((newItem) => newItem.url_path !== item.url_path))
-        .map((item) => item.url_path);
-      // Get added panels, by filtering new dashboards that are not in initial panels
-      const added = newDasboards.filter((item) => !initialPanels.some((oldItem) => oldItem.url_path === item.url_path));
-      const notShowInSidebar =
-        newDasboards.filter((item) => !item.show_in_sidebar).map((item) => panels[item.url_path]!) || [];
-      if (
-        added.length > 0 ||
-        removed.length > 0 ||
-        !haveSamePanelPaths(notShowInSidebar, initDasboardPanels.notShowInSidebar || [])
-      ) {
-        this._dashboardPanels = {
-          ...initDasboardPanels,
-          added: added.map((item) => panels[item.url_path]!),
-          removed,
-          notShowInSidebar,
-        };
-        console.debug(
-          '%cSTORE:',
-          'color: #4dabf7;',
-          'Detected changes in sidebar panels',
-          { added, removed, notShowInSidebar },
-          'Updated dashboard panels state:',
-          this._dashboardPanels
-        );
-        this._panelHasChanged = true;
-        await nextRender();
-        this._needReloadToast();
-      } else {
-        this._panelHasChanged = false;
+    const generation = this._subscriptionGeneration;
+    this._panelSubscriptionPending = true;
+    try {
+      const hasUserDefaultPanel = Boolean(this.hass.userData?.default_panel);
+      if (!this._dashboardPanels?.initialPanels) {
+        await this._getPanelItems(hasUserDefaultPanel).then((items) => {
+          if (generation !== this._subscriptionGeneration) return;
+          this._dashboardPanels = {
+            initialPanels: [...items],
+            notShowInSidebar:
+              items.filter((item) => !item.show_in_sidebar).map((item) => this.hass.panels[item.url_path]!) || [],
+          };
+        });
+        console.debug('%cSTORE:', 'color: #4dabf7;', 'Initial dashboard panels state set to', this._dashboardPanels);
       }
-    });
+      if (generation !== this._subscriptionGeneration) return;
+      this._panelUnsubscribe = this._utils.PANEL.subscribePanels(this.hass.connection, async (panels: Panels) => {
+        if (generation !== this._subscriptionGeneration) return;
+        const initDasboardPanels = this._dashboardPanels ?? { initialPanels: [], notShowInSidebar: [] };
+        const initialPanels = initDasboardPanels.initialPanels || [];
+        const newDasboards = await this._getPanelItems(hasUserDefaultPanel);
+        if (generation !== this._subscriptionGeneration) return;
+        // Get deleted panels and added panels, by comparing new dashboards with initial panels
+        const removed = initialPanels
+          .filter((item) => Object.values(newDasboards).every((newItem) => newItem.url_path !== item.url_path))
+          .map((item) => item.url_path);
+        // Get added panels, by filtering new dashboards that are not in initial panels
+        const added = newDasboards.filter(
+          (item) => !initialPanels.some((oldItem) => oldItem.url_path === item.url_path)
+        );
+        const notShowInSidebar =
+          newDasboards.filter((item) => !item.show_in_sidebar).map((item) => panels[item.url_path]!) || [];
+        if (
+          added.length > 0 ||
+          removed.length > 0 ||
+          !haveSamePanelPaths(notShowInSidebar, initDasboardPanels.notShowInSidebar || [])
+        ) {
+          this._dashboardPanels = {
+            ...initDasboardPanels,
+            added: added.map((item) => panels[item.url_path]!),
+            removed,
+            notShowInSidebar,
+          };
+          console.debug(
+            '%cSTORE:',
+            'color: #4dabf7;',
+            'Detected changes in sidebar panels',
+            { added, removed, notShowInSidebar },
+            'Updated dashboard panels state:',
+            this._dashboardPanels
+          );
+          this._panelHasChanged = true;
+          await nextRender();
+          if (generation !== this._subscriptionGeneration) return;
+          this._needReloadToast();
+        } else {
+          this._panelHasChanged = false;
+        }
+      });
+    } finally {
+      if (generation === this._subscriptionGeneration) this._panelSubscriptionPending = false;
+    }
+  }
+
+  public dispose(): void {
+    this._subscriptionGeneration += 1;
+    this._panelUnsubscribe?.();
+    this._panelUnsubscribe = undefined;
+    this._panelSubscriptionPending = false;
   }
 
   public _shouldUpdateConfig = async (): Promise<Boolean> => {
