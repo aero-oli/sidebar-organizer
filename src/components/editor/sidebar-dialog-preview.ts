@@ -231,28 +231,23 @@ export class SidebarDialogPreview extends BaseEditor {
   private _subscribeNotification(panel: HTMLElement, configValue: string) {
     let badge = panel.querySelector('span.notification-badge') as HTMLElement;
     let icon = panel.querySelector('ha-icon.notification-badge') as HTMLElement;
-    if (!badge && !icon) {
+    if (!badge) {
       badge = document.createElement('span');
       badge.classList.add('notification-badge');
       panel.querySelector('div.icon-item')?.appendChild(badge);
+    }
+    if (!icon) {
       icon = document.createElement('ha-icon');
       icon.classList.add('notification-badge');
       panel.querySelector('div.icon-item')?.appendChild(icon);
     }
 
     const callback = (result: any) => {
-      if (result) {
-        if (typeof result === 'string' && isIcon(result)) {
-          badge.remove();
-          icon.setAttribute('icon', result);
-        } else {
-          icon.remove();
-          badge.textContent = String(result);
-        }
-      } else {
-        badge.remove();
-        icon.remove();
-      }
+      const showIcon = Boolean(result) && typeof result === 'string' && isIcon(result);
+      badge.hidden = !result || showIcon;
+      icon.hidden = !showIcon;
+      if (showIcon) icon.setAttribute('icon', result);
+      else if (result) badge.textContent = String(result);
     };
 
     this._subscribeTemplate(configValue, callback);
@@ -1011,6 +1006,7 @@ export class SidebarDialogPreview extends BaseEditor {
           max-width: 28px;
         }
 
+        .notification-badge[hidden] { display: none !important; }
         .notification-badge {
           position: absolute;
           left: calc(var(--app-drawer-width, 248px) - 26px);

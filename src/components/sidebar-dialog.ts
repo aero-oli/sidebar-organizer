@@ -38,6 +38,7 @@ import { showToast } from '@utilities/toast-notify';
 import { isEmpty, pick } from 'es-toolkit/compat';
 import { html, css, TemplateResult, PropertyValues, CSSResultGroup, nothing } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
+import { ifDefined } from 'lit/directives/if-defined.js';
 import { styleMap } from 'lit/directives/style-map.js';
 
 import './editor';
@@ -122,6 +123,12 @@ export class SidebarConfigDialog extends BaseEditor {
   @state() public _narrow = false;
   @state() private _workbenchRoute: WorkbenchRoute = 'sidebar';
   @state() private _previewOpen = false;
+  @state() private _desktopPreview = false;
+  private _previewMedia?: MediaQueryList;
+  private _previewMediaChanged = (event: MediaQueryListEvent): void => {
+    this._desktopPreview = event.matches;
+    if (event.matches) this._previewOpen = false;
+  };
   @state() private _draftOffer?: { state: 'matching' | 'stale'; draft: EditorDraftEnvelope };
 
   private _configSubscription = new SubscriptionGuard();
@@ -152,6 +159,9 @@ export class SidebarConfigDialog extends BaseEditor {
   connectedCallback(): void {
     super.connectedCallback();
     this._connected = true;
+    this._previewMedia = window.matchMedia('(min-width: 1500px)');
+    this._desktopPreview = this._previewMedia.matches;
+    this._previewMedia.addEventListener('change', this._previewMediaChanged);
     setActiveStorageUser(this.hass.user?.id);
     this._configSource = getConfigSource();
     this._useConfigFile = this._configSource === 'static_yaml';
@@ -164,6 +174,7 @@ export class SidebarConfigDialog extends BaseEditor {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this._connected = false;
+    this._previewMedia?.removeEventListener('change', this._previewMediaChanged);
     if (this._resizeObserver) {
       this._resizeObserver.disconnect();
       this._resizeObserver = undefined;
@@ -519,7 +530,7 @@ export class SidebarConfigDialog extends BaseEditor {
 
     return html`
       <div class="workbench">
-        <header class="workbench-header">
+        <header class="workbench-header" ?inert=${this._previewOpen && !this._desktopPreview}>
           <button class="target-control" @click=${() => this._goToRoute('sidebar')}>
             <ha-icon icon="mdi:account-circle-outline"></ha-icon>
             <span><small>Configuration</small><strong>${targetName}</strong></span>
@@ -538,12 +549,12 @@ export class SidebarConfigDialog extends BaseEditor {
           </ha-button>
         </header>
 
-        <div class="workbench-notice">
+        <div class="workbench-notice" ?inert=${this._previewOpen && !this._desktopPreview}>
           ${this._draftOffer ? this._renderDraftRecovery(this._draftOffer) : nothing}
         </div>
 
         <div class="workbench-body">
-          <nav class="task-rail" aria-label="Settings categories">
+          <nav class="task-rail" aria-label="Settings categories" ?inert=${this._previewOpen && !this._desktopPreview}>
             ${routes.map(
               ({ route, label, description, icon }) => html`
                 <button
@@ -561,7 +572,7 @@ export class SidebarConfigDialog extends BaseEditor {
             )}
           </nav>
 
-          <main class="editor-canvas" data-yaml-invalid=${!session.yamlValid && this._workbenchRoute !== 'yaml'}>
+          <main class="editor-canvas" ?inert=${this._previewOpen && !this._desktopPreview} data-yaml-invalid=${!session.yamlValid && this._workbenchRoute !== 'yaml'}>
             <div class="mobile-stage-select">
               <ha-select
                 .label=${'Settings stage'}
@@ -580,13 +591,30 @@ export class SidebarConfigDialog extends BaseEditor {
             ${this._renderWorkbenchRoute()}
           </main>
 
-          <aside class="desktop-preview" aria-label="Live sidebar preview">
-            <div class="preview-heading"><span>Live preview</span><small>Updates as you edit</small></div>
+          <aside
+            class=${this._desktopPreview ? 'desktop-preview' : 'preview-drawer'}
+            ?open=${this._previewOpen}
+            ?hidden=${!this._desktopPreview && !this._previewOpen}
+            ?inert=${!this._desktopPreview && !this._previewOpen}
+            aria-label="Live sidebar preview"
+            role=${ifDefined(this._desktopPreview ? undefined : 'dialog')}
+            aria-modal=${ifDefined(this._desktopPreview ? undefined : 'true')}
+            @keydown=${this._previewKeydown}
+          >
+            ${this._desktopPreview
+              ? html`<div class="preview-heading"><span>Live preview</span><small>Updates as you edit</small></div>`
+              : html`<div class="drawer-header"><strong>Sidebar preview</strong>
+                  <ha-icon-button
+                    .label=${'Close preview'}
+                    .path=${'M19,6.41 17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z'}
+                    @click=${this._closePreview}
+                  ></ha-icon-button>
+                </div>`}
             ${this._renderSidebarPreview()}
           </aside>
         </div>
 
-        <footer class="workbench-actions">
+        <footer class="workbench-actions" ?inert=${this._previewOpen && !this._desktopPreview}>
           <div class="apply-state">
             ${this.saveBlockedReason
               ? html`<ha-icon icon="mdi:information-outline"></ha-icon><span>${this.saveBlockedReason}</span>`
@@ -609,16 +637,6 @@ export class SidebarConfigDialog extends BaseEditor {
         </footer>
 
         <div class="preview-scrim" ?open=${this._previewOpen} @click=${this._closePreview}></div>
-        <aside class="preview-drawer" ?open=${this._previewOpen} aria-hidden=${!this._previewOpen} role="dialog" aria-modal="true" @keydown=${this._previewKeydown}>
-          <div class="drawer-header"><strong>Sidebar preview</strong>
-            <ha-icon-button
-              .label=${'Close preview'}
-              .path=${'M19,6.41 17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z'}
-              @click=${this._closePreview}
-            ></ha-icon-button>
-          </div>
-          ${this._renderSidebarPreview()}
-        </aside>
       </div>
     `;
   }
@@ -790,6 +808,7 @@ export class SidebarConfigDialog extends BaseEditor {
   }
 
   private _openPreview = (): void => {
+    if (this._desktopPreview) return;
     this._previewOpen = true;
     void this.updateComplete.then(() =>
       this.shadowRoot?.querySelector<HTMLElement>('.preview-drawer ha-icon-button')?.focus()
@@ -802,6 +821,7 @@ export class SidebarConfigDialog extends BaseEditor {
   };
 
   private _previewKeydown(event: KeyboardEvent): void {
+    if (!this._previewOpen || this._desktopPreview) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       this._closePreview();
@@ -2462,6 +2482,7 @@ export class SidebarConfigDialog extends BaseEditor {
         .draft-recovery span { color: var(--secondary-text-color); }
         .draft-actions { display: flex; gap: 6px; }
         .preview-drawer, .preview-scrim { display: none; }
+        .preview-drawer[hidden] { display: none !important; }
         .mobile-stage-select { display: none; }
         .stale-preview-alert { margin-bottom: 16px; }
         .editor-canvas[data-yaml-invalid='true'] .stage > :not(.stage-heading) {

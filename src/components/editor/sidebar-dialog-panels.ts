@@ -184,7 +184,7 @@ export class SidebarDialogPanels extends BaseEditor {
             <summary><span><strong>Bottom grid</strong><small>Compact icon items shown in a grid.</small></span></summary>
             ${this._renderPanelSelector(BOTTOM_SECTION.BOTTOM_GRID_ITEMS)}
           </details>
-          <details class="layout-detail">
+          <details class="layout-detail" .open=${this._selectedBottomGroup !== null}>
             <summary><span><strong>Bottom groups</strong><small>Expandable groups kept in the bottom area.</small></span></summary>
             ${this._renderBottomGroupsList()}
           </details>
@@ -635,6 +635,17 @@ export class SidebarDialogPanels extends BaseEditor {
           ])
         );
         updates.custom_groups = renameGroups;
+        if (Object.hasOwn(pinnedGroups, key)) {
+          pinnedGroups[newName] = pinnedGroups[key];
+          delete pinnedGroups[key];
+          updates.pinned_groups = pinnedGroups;
+        }
+        const visibilityGroups = { ...(this._sidebarConfig.visibility_templates?.groups || {}) };
+        if (Object.hasOwn(visibilityGroups, key)) {
+          visibilityGroups[newName] = visibilityGroups[key];
+          delete visibilityGroups[key];
+          updates.visibility_templates = { ...this._sidebarConfig.visibility_templates, groups: visibilityGroups };
+        }
         updateSidebarConfig(updates);
 
         break;
@@ -969,7 +980,7 @@ export class SidebarDialogPanels extends BaseEditor {
     return html`
       <div class="header-row flex-icon">
         <span>GROUP: ${typeTitle} - ORDER </span>
-        <ha-icon-button .path=${mdiSortAlphabeticalVariant} @click=${() => this._sortItems(selectedType)}>
+        <ha-icon-button .path=${mdiSortAlphabeticalVariant} @click=${() => this._sortItems(selectedType, configValue)}>
         </ha-icon-button>
       </div>
 
@@ -1051,11 +1062,13 @@ export class SidebarDialogPanels extends BaseEditor {
     return html`<div style="flex: 1"></div>`;
   }
 
-  private _sortItems(type: string) {
+  private _sortItems(type: string, configValue: string = type) {
     const hassPanels = this.hass?.panels;
-    const selectedItems =
-      type === BOTTOM_SECTION.BOTTOM_ITEMS || type === BOTTOM_SECTION.BOTTOM_GRID_ITEMS
-        ? this._sidebarConfig[type as BOTTOM_SECTION.BOTTOM_ITEMS | BOTTOM_SECTION.BOTTOM_GRID_ITEMS] || []
+    const isFlatBottom = configValue === BOTTOM_SECTION.BOTTOM_ITEMS || configValue === BOTTOM_SECTION.BOTTOM_GRID_ITEMS;
+    const selectedItems = configValue === BOTTOM_SECTION.BOTTOM_GROUPS
+      ? this._sidebarConfig.bottom_groups?.[type] || []
+      : isFlatBottom
+        ? this._sidebarConfig[configValue as BOTTOM_SECTION.BOTTOM_ITEMS | BOTTOM_SECTION.BOTTOM_GRID_ITEMS] || []
         : this._sidebarConfig.custom_groups?.[type] || [];
 
     // Create a list of items with their titles
@@ -1095,11 +1108,13 @@ export class SidebarDialogPanels extends BaseEditor {
 
     const updates: Partial<SidebarConfig> = {};
     // Update the config with the new sorted keys
-    if (type === BOTTOM_SECTION.BOTTOM_ITEMS || type === BOTTOM_SECTION.BOTTOM_GRID_ITEMS) {
-      const bottomKey = type as BOTTOM_SECTION.BOTTOM_ITEMS | BOTTOM_SECTION.BOTTOM_GRID_ITEMS;
+    if (isFlatBottom) {
+      const bottomKey = configValue as BOTTOM_SECTION.BOTTOM_ITEMS | BOTTOM_SECTION.BOTTOM_GRID_ITEMS;
       let bottomItems = [...(this._sidebarConfig[bottomKey] || [])];
       bottomItems = sortedItemKeys;
       updates[bottomKey] = bottomItems;
+    } else if (configValue === BOTTOM_SECTION.BOTTOM_GROUPS) {
+      updates.bottom_groups = { ...this._sidebarConfig.bottom_groups, [type]: sortedItemKeys };
     } else {
       let customGroups = { ...(this._sidebarConfig.custom_groups || {}) };
       let group = [...(customGroups[type] || [])];
@@ -1264,6 +1279,11 @@ export class SidebarDialogPanels extends BaseEditor {
         this._selectedGroup = null;
         this._selectedBottom =
           group === BOTTOM_SECTION.BOTTOM_GRID_ITEMS ? BOTTOM_SECTION.BOTTOM_GRID_ITEMS : BOTTOM_SECTION.BOTTOM_ITEMS;
+      } else if (Object.hasOwn(this._sidebarConfig.bottom_groups || {}, group)) {
+        this._selectedTab = PANEL_AREA.BOTTOM_PANELS;
+        this._selectedGroup = null;
+        this._selectedBottom = BOTTOM_SECTION.BOTTOM_GROUPS;
+        this._selectedBottomGroup = group;
       } else {
         this._selectedTab = PANEL_AREA.CUSTOM_GROUPS;
         this._selectedGroup = group;
