@@ -3,7 +3,17 @@
  */
 export default {
   plugins: [
-    '@semantic-release/commit-analyzer',
+    [
+      '@semantic-release/commit-analyzer',
+      {
+        preset: 'conventionalcommits',
+        releaseRules: [
+          { breaking: true, release: 'major' },
+          { type: 'Fix', release: 'patch' },
+          { type: 'Improve', release: 'patch' },
+        ],
+      },
+    ],
     [
       '@semantic-release/release-notes-generator',
       {
@@ -13,6 +23,7 @@ export default {
             { type: 'feat', section: 'Features' },
             { type: 'fix', section: 'Bug Fixes' },
             { type: 'Fix', section: 'Bug Fixes' },
+            { type: 'improve', section: 'Improvements' },
             { type: 'docs', hidden: false, section: 'Documentation' },
             { type: 'doc', hidden: false, section: 'Documentation' },
             { type: 'chore', hidden: true, section: 'Chores' },
