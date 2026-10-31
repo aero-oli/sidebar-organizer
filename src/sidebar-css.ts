@@ -115,7 +115,9 @@ export const DIVIDER_ADDED_STYLE = css`
     text-overflow: ellipsis;
   }
 
-  ha-list-item-button[data-notification='true'] span.badge.no-visible {
+  ha-list-item-button[data-notification='true'] span.badge.no-visible,
+  ha-list-item-button[data-notification='true'] ha-icon.badge.no-visible {
+    display: none !important;
     visibility: hidden !important;
     opacity: 0 !important;
   }

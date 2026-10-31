@@ -794,6 +794,7 @@ export class SidebarOrganizer {
     const notificationMap = new Map(Object.entries(notification || {}));
     const groupVisibilityMap = new Map<string, string>(Object.entries(visibility_templates?.groups || {}));
     const itemVisibilityMap = new Map<string, string>(Object.entries(visibility_templates?.items || {}));
+    const visibilityTemplateUsageLog: { panelId: string; source: 'group' | 'item'; template: string }[] = [];
 
     if (new_items && new_items.length > 0) {
       // Add new items to sidebar before spacer
@@ -823,18 +824,29 @@ export class SidebarOrganizer {
 
     const items = await this._getContainerItems(beforeSpacerContainer);
     Array.from(items).forEach((item: SidebarPanelItem) => {
-      if (item.hasAttribute(ATTRIBUTE.NEW_ITEM)) return; // Skip new items
-
-      const panelId = item.href.replace('/', '');
-      item.setAttribute(ATTRIBUTE.DATA_PANEL, panelId);
+      const isNewItem = item.hasAttribute(ATTRIBUTE.NEW_ITEM);
+      const panelId = isNewItem ? item.getAttribute(ATTRIBUTE.DATA_PANEL)! : item.href.replace('/', '');
+      if (!isNewItem) item.setAttribute(ATTRIBUTE.DATA_PANEL, panelId);
 
       if (hidden_items?.includes(panelId)) {
         item.style.display = 'none';
       }
 
       const notificationValue = notificationMap.get(panelId);
-      if (notificationValue !== undefined) {
+      if (!isNewItem && notificationValue !== undefined) {
         this._subscribeNotification(item, notificationValue);
+      }
+
+      const group = this._getGroupOfPanel(panelId);
+      const groupTemplate = group ? groupVisibilityMap.get(group) : undefined;
+      const visibilityTemplate = groupTemplate || itemVisibilityMap.get(panelId);
+      if (visibilityTemplate) {
+        visibilityTemplateUsageLog.push({
+          panelId,
+          source: groupTemplate ? 'group' : 'item',
+          template: visibilityTemplate,
+        });
+        this._subscribeVisibility(item, visibilityTemplate);
       }
     });
 
@@ -859,16 +871,14 @@ export class SidebarOrganizer {
     const bottomGridItems = document.createDocumentFragment();
 
     const inGroup = (panel: string): string | null => this._getGroupOfPanel(panel);
-    const groupHasVisibilityTemplate = (group: string): boolean => groupVisibilityMap.has(group);
-    const itemHasVisibilityTemplate = (item: string): boolean => itemVisibilityMap.has(item);
 
     const defaultPanelUrlPath = getDefaultPanelUrlPath(this.hass);
 
     const orderedPanels: Omit<NewItemConfig, 'icon'>[] = [];
-    const visibilityTemplateUsageLog: { panelId: string; source: 'group' | 'item'; template: string }[] = [];
+    const itemsByPanel = new Map(Array.from(items, (item) => [item.getAttribute(ATTRIBUTE.DATA_PANEL), item]));
 
     this._baseOrder.forEach((panelId) => {
-      const foundItem = Array.from(items).find((el) => el.getAttribute(ATTRIBUTE.DATA_PANEL) === panelId);
+      const foundItem = itemsByPanel.get(panelId);
       if (!foundItem) {
         console.log(
           '%cSIDEBAR-ORGANIZER:%c ❌ Panel item not found for panel ID:',
@@ -879,20 +889,6 @@ export class SidebarOrganizer {
       } else {
         const group = inGroup(panelId);
         const isNewItem = foundItem.hasAttribute(ATTRIBUTE.NEW_ITEM);
-        const groupVisibilityTemplate =
-          group && groupHasVisibilityTemplate(group) ? groupVisibilityMap.get(group)! : null;
-        const itemVisibilityTemplate = itemHasVisibilityTemplate(panelId) ? itemVisibilityMap.get(panelId)! : null;
-        const visibilityTemplate = groupVisibilityTemplate || itemVisibilityTemplate;
-
-        if (visibilityTemplate) {
-          visibilityTemplateUsageLog.push({
-            panelId,
-            source: groupVisibilityTemplate ? 'group' : 'item',
-            template: visibilityTemplate,
-          });
-
-          this._subscribeVisibility(foundItem, visibilityTemplate);
-        }
         if (isNewItem || group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
           const haTooltip = createHaTooltipForItem(foundItem);
           if (group === PANEL_TYPE.BOTTOM_GRID_ITEMS) {
@@ -1001,20 +997,26 @@ export class SidebarOrganizer {
       ...Array.from(topItems),
       ...(bottomItems ? Array.from(bottomItems) : []),
     ] as SidebarPanelItem[];
+    const topItemsByPanel = new Map(Array.from(topItems, (item) => [item.getAttribute(ATTRIBUTE.DATA_PANEL), item]));
+    const bottomItemsByPanel = new Map(
+      Array.from(bottomItems || [], (item) => [item.getAttribute(ATTRIBUTE.DATA_PANEL), item])
+    );
 
     Object.entries(custom_groups || {}).forEach(([groupName, panels]) => {
       if (groupName === PANEL_TYPE.UNCATEGORIZED_ITEMS) return; // Skip uncategorized group as it's not an actual group but a placeholder for ungrouped items
       const groupVisibilityTemplate = groupVisibilityMap.has(groupName) ? groupVisibilityMap.get(groupName)! : null;
       const isCollapsed = this.collapsedItems.has(groupName);
-      panels.forEach((panelId, index) => {
-        const item = Array.from(topItems).find((el) => el.getAttribute(ATTRIBUTE.DATA_PANEL) === panelId);
+      let dividerAdded = false;
+      panels.forEach((panelId) => {
+        const item = topItemsByPanel.get(panelId);
         if (item) {
-          if (index === 0) {
+          if (!dividerAdded) {
             const groupDivider = this._createDividerWithGroup(groupName, isCollapsed);
             if (groupVisibilityTemplate) {
               this._subscribeVisibility(groupDivider, groupVisibilityTemplate);
             }
             item.insertAdjacentElement('beforebegin', groupDivider);
+            dividerAdded = true;
           }
           item.classList.toggle(CLASS.COLLAPSED, isCollapsed);
         }
@@ -1034,17 +1036,17 @@ export class SidebarOrganizer {
       Object.entries(bottom_groups).forEach(([groupName, panels]) => {
         const isCollapsed = this.collapsedItems.has(groupName);
         const groupVisibilityTemplate = groupVisibilityMap.has(groupName) ? groupVisibilityMap.get(groupName)! : null;
-        panels.forEach((panelId, index) => {
-          const item = bottomItems
-            ? Array.from(bottomItems).find((el) => el.getAttribute(ATTRIBUTE.DATA_PANEL) === panelId)
-            : null;
+        let dividerAdded = false;
+        panels.forEach((panelId) => {
+          const item = bottomItemsByPanel.get(panelId);
           if (item) {
-            if (index === 0) {
+            if (!dividerAdded) {
               const groupDivider = this._createDividerWithGroup(groupName, isCollapsed);
               if (groupVisibilityTemplate) {
                 this._subscribeVisibility(groupDivider, groupVisibilityTemplate);
               }
               item.insertAdjacentElement('beforebegin', groupDivider);
+              dividerAdded = true;
             }
             item.classList.toggle(CLASS.COLLAPSED, isCollapsed);
           }
@@ -1480,8 +1482,8 @@ export class SidebarOrganizer {
   }
 
   private _subscribeNotification(panel: HTMLElement, value: string) {
-    let badge = panel.querySelector(SELECTOR.BADGE) ?? computeBadge();
-    let notifyIcon = panel.querySelector(SELECTOR.NOTIFY_ICON) ?? computeNotifyIcon();
+    const badge = panel.querySelector(`span${SELECTOR.BADGE}`) ?? computeBadge();
+    const notifyIcon = panel.querySelector(SELECTOR.NOTIFY_ICON) ?? computeNotifyIcon();
     const itemText = panel.querySelector(SELECTOR.ITEM_TEXT) as HTMLElement;
     panel.insertBefore(badge, itemText.nextElementSibling);
     panel.insertBefore(notifyIcon, itemText);
@@ -1496,16 +1498,14 @@ export class SidebarOrganizer {
           notifyIcon.classList.toggle(CLASS.NO_VISIBLE, false);
           notifyIcon.setAttribute('icon', resultContent);
           badge.classList.toggle(CLASS.NO_VISIBLE, true);
-          badge.remove();
         } else {
           // Show badge, hide icon
           badge.textContent = String(resultContent);
           badge.classList.toggle(CLASS.NO_VISIBLE, false);
           badge.classList.toggle(CLASS.BADGE_NUMBER, !isNaN(resultContent));
-          badge.classList.toggle(CLASS.LARGE_BADGE, resultContent.length >= 3);
+          badge.classList.toggle(CLASS.LARGE_BADGE, String(resultContent).length >= 3);
           notifyIcon.classList.toggle(CLASS.NO_VISIBLE, true);
           notifyIcon.removeAttribute('icon');
-          notifyIcon.remove();
         }
       } else {
         // Hide both elements when no value
