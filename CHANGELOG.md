@@ -1,3 +1,9 @@
+## [4.8.8](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.7...v4.8.8) (2026-11-08)
+
+### Improvements
+
+* Update install guidance for Home Assistant Marketplace ([32dd39e](https://github.com/aero-oli/sidebar-organizer/commit/32dd39e6cf2dbd6338df877d0df111f66c628796))
+
 ## [4.8.7](https://github.com/aero-oli/sidebar-organizer/compare/v4.8.6...v4.8.7) (2026-10-31)
 
 ### Improvements
