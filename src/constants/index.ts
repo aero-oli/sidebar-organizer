@@ -96,7 +96,7 @@ export const ALERT_MSG = {
   HA_CONFIG_MODE:
     'Home Assistant config-folder mode reads and writes the shared YAML file through the Sidebar Organizer integration.',
   HA_CONFIG_UNAVAILABLE:
-    'Home Assistant config-folder mode requires Sidebar Organizer to be installed as a HACS integration, restarted, and added in Settings > Devices & services.',
+    'Home Assistant config-folder mode requires the Sidebar Organizer integration. Install it, restart Home Assistant if prompted, and finish setup in Settings > Devices & services.',
   HA_CONFIG_WRITE_DISABLED: 'Writing to the Home Assistant config file is disabled by the backend integration.',
   HA_CONFIG_RELOAD_SUCCESS: 'Reloaded Sidebar Organizer config from Home Assistant config folder.',
   HA_CONFIG_SAVE_SUCCESS: 'Saved Sidebar Organizer config to Home Assistant config folder.',

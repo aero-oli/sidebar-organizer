@@ -3,60 +3,60 @@
   "chunks": {
     "sidebar-organizer.js": {
       "imports": [
-        "index-DOLBdgyx.js"
+        "index-CcBcwWJi.js"
       ],
       "dynamicImports": [],
       "bytes": 267,
       "editor": false,
       "runtime": false
     },
-    "index-DOLBdgyx.js": {
+    "index-CcBcwWJi.js": {
       "imports": [],
       "dynamicImports": [
-        "sidebar-organizer-DPksV1TP.js"
+        "sidebar-organizer-DRnf7OpX.js"
       ],
-      "bytes": 11856,
+      "bytes": 11878,
       "editor": false,
       "runtime": false
     },
-    "sidebar-organizer-DPksV1TP.js": {
+    "sidebar-organizer-DRnf7OpX.js": {
       "imports": [
-        "index-DOLBdgyx.js"
+        "index-CcBcwWJi.js"
       ],
       "dynamicImports": [
-        "sidebar-organizer-dialog-CNsvrcfa.js",
-        "sidebar-organizer-dialog_wa-CHDJ4lsz.js"
+        "sidebar-organizer-dialog-B9J9dHSr.js",
+        "sidebar-organizer-dialog_wa-BqrXcbF9.js"
       ],
       "bytes": 265456,
       "editor": false,
       "runtime": true
     },
-    "sidebar-organizer-dialog-CNsvrcfa.js": {
+    "sidebar-organizer-dialog-B9J9dHSr.js": {
       "imports": [
-        "sidebar-organizer-DPksV1TP.js",
-        "index-DOLBdgyx.js",
-        "sidebar-dialog-kSUST9PF.js"
+        "sidebar-organizer-DRnf7OpX.js",
+        "index-CcBcwWJi.js",
+        "sidebar-dialog-BaiPOWBg.js"
       ],
       "dynamicImports": [],
       "bytes": 6083,
       "editor": false,
       "runtime": false
     },
-    "sidebar-organizer-dialog_wa-CHDJ4lsz.js": {
+    "sidebar-organizer-dialog_wa-BqrXcbF9.js": {
       "imports": [
-        "sidebar-organizer-DPksV1TP.js",
-        "index-DOLBdgyx.js",
-        "sidebar-dialog-kSUST9PF.js"
+        "sidebar-organizer-DRnf7OpX.js",
+        "index-CcBcwWJi.js",
+        "sidebar-dialog-BaiPOWBg.js"
       ],
       "dynamicImports": [],
       "bytes": 7628,
       "editor": false,
       "runtime": false
     },
-    "sidebar-dialog-kSUST9PF.js": {
+    "sidebar-dialog-BaiPOWBg.js": {
       "imports": [
-        "sidebar-organizer-DPksV1TP.js",
-        "index-DOLBdgyx.js"
+        "sidebar-organizer-DRnf7OpX.js",
+        "index-CcBcwWJi.js"
       ],
       "dynamicImports": [],
       "bytes": 656609,

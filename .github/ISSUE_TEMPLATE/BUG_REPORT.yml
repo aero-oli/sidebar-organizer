@@ -54,7 +54,7 @@ body:
       label: What version of Sidebar Organizer are you using?
       placeholder: e.g., 1.2.3
       description: >
-        Can be found in [hacs plugin page](https://my.home-assistant.io/redirect/hacs_repository/?owner=ngocjohn&repository=sidebar-organizer&category=plugin) (top left corner). Or in the plugin configuration dialog header.
+        Check the Sidebar Organizer dialog header for the installed version.
   - type: input
     validations:
       required: false
